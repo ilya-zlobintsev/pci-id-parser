@@ -25,6 +25,7 @@ pub enum PciDatabaseError {
     FileNotFound,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct PciDatabase {
     pub vendors: BTreeMap<String, PciVendor>,
 }
