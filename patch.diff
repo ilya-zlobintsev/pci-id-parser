@@ -29,6 +29,16 @@
          }
        },
        "73c3": {
+@@ -70236,7 +70236,8 @@
+       "0a16": {
+         "name": "Haswell-ULT Integrated Graphics Controller",
+         "subdevices": {
+-          "17aa 2214": "ThinkPad X240"
++          "17aa 2214": "ThinkPad X240",
++         "17aa 220c": "ThinkPad T440s"
+         }
+       },
+       "0a22": {
 @@ -91688,4 +91689,4 @@
      "name": "Illegal Vendor ID",
      "devices": {}
