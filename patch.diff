@@ -29,6 +29,16 @@
          }
        },
        "73c3": {
+@@ -26889,7 +26891,8 @@
+       "06e4": {
+         "name": "G98 [GeForce 8400 GS Rev. 2]",
+         "subdevices": {
+-          "1458 3475": "GV-NX84S256HE [GeForce 8400 GS]"
++          "1458 3475": "GV-NX84S256HE [GeForce 8400 GS]",
++	  "1043 8321": "Asus 8400 GS 512MB"
+         }
+       },
+       "06e5": {
 @@ -70236,7 +70236,8 @@
        "0a16": {
          "name": "Haswell-ULT Integrated Graphics Controller",
