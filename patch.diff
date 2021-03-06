@@ -1,6 +1,6 @@
---- devices.json.orig	2021-01-26 23:08:39.386961075 +0200
-+++ devices.json	2021-01-26 23:09:27.910516570 +0200
-@@ -5447,7 +5447,7 @@
+--- devices.json.orig	2021-03-06 09:42:50.428254401 +0200
++++ devices.json	2021-03-06 09:43:21.135850006 +0200
+@@ -5472,7 +5472,7 @@
            "1849 5030": "Phantom Gaming D Radeon RX580 8G OC",
            "1da2 e353": "Radeon RX 570 Pulse 4GB",
            "1da2 e366": "Nitro+ Radeon RX 570/580/590",
@@ -9,7 +9,7 @@
          }
        },
        "67e0": {
-@@ -5910,7 +5910,8 @@
+@@ -5935,7 +5935,8 @@
            "1002 0b36": "RX Vega64",
            "1002 6b76": "RX Vega64",
            "1458 230c": "Radeon RX VEGA 56 GAMING OC 8G",
@@ -19,17 +19,18 @@
          }
        },
        "6880": {
-@@ -7209,7 +7209,8 @@
+@@ -7217,7 +7218,9 @@
        "73bf": {
          "name": "Navi 21 [Radeon RX 6800/6800 XT / 6900 XT]",
          "subdevices": {
 -          "1eae 6701": "XFX Speedster MERC 319 AMD Radeon RX 6800 XT Black"
 +          "1eae 6701": "XFX Speedster MERC 319 AMD Radeon RX 6800 XT Black",
-+	  "148c 2408": "Powercolor RX 6900 XT 16GB"
++	  "148c 2408": "Powercolor RX 6900 XT 16GB",
++	  "1002 0e3a": "AMD RX 6800 16GB"
          }
        },
        "73c3": {
-@@ -26889,7 +26891,8 @@
+@@ -26897,7 +26900,8 @@
        "06e4": {
          "name": "G98 [GeForce 8400 GS Rev. 2]",
          "subdevices": {
@@ -39,7 +40,7 @@
          }
        },
        "06e5": {
-@@ -70236,7 +70236,8 @@
+@@ -70334,7 +70338,8 @@
        "0a16": {
          "name": "Haswell-ULT Integrated Graphics Controller",
          "subdevices": {
@@ -49,7 +50,7 @@
          }
        },
        "0a22": {
-@@ -91688,4 +91689,4 @@
+@@ -92315,4 +92320,4 @@
      "name": "Illegal Vendor ID",
      "devices": {}
    }
