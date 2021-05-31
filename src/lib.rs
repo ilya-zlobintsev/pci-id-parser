@@ -23,10 +23,7 @@ impl VendorData {}
 #[derive(Debug)]
 pub enum PciDatabaseError {
     FileNotFound,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct PciDatabase {
+} #[derive(Serialize, Deserialize, Debug)] pub struct PciDatabase {
     pub vendors: BTreeMap<String, PciVendor>,
 }
 
