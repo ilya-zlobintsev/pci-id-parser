@@ -10,8 +10,8 @@ edition = "2018"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-env_logger = "0.8"
+env_logger = "0.9"
 reqwest = { version = "0.11", features = ["blocking"] }
-native-tls = { version = "", features = ["vendored"] }
+native-tls = { version = "0.2", features = ["vendored"] }
 handlebars = "4.0"
 chrono = "0.4"
