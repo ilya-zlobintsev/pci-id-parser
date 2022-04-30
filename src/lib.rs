@@ -1,16 +1,22 @@
-use serde::{Deserialize, Serialize};
+mod error;
+
+use error::Error;
 use std::{
     collections::BTreeMap,
     fs,
+    mem::size_of_val,
     path::{Path, PathBuf},
 };
+use tracing::trace;
+
+const DB_PATHS: &[&str] = &["/usr/share/hwdata/pci.ids", "/usr/share/misc/pci.ids"];
 
 #[derive(Debug)]
 pub enum VendorDataError {
     MissingIdsFile,
 }
 
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug)]
 pub struct VendorData {
     pub gpu_vendor: Option<String>,
     pub gpu_model: Option<String>,
@@ -18,44 +24,36 @@ pub struct VendorData {
     pub card_model: Option<String>,
 }
 
-impl VendorData {}
-
 #[derive(Debug)]
-pub enum PciDatabaseError {
-    FileNotFound,
-} #[derive(Serialize, Deserialize, Debug)] pub struct PciDatabase {
+pub struct PciDatabase {
     pub vendors: BTreeMap<String, PciVendor>,
 }
 
 impl PciDatabase {
-    pub fn read() -> Result<Self, PciDatabaseError> {
-        let _ = env_logger::builder().is_test(true).try_init();
-
+    pub fn read() -> Result<Self, Error> {
         match Self::read_pci_db() {
             Some(pci_ids) => {
-                log::trace!("Parsing pci.ids");
+                trace!("Parsing pci.ids");
                 Ok(PciDatabase {
                     vendors: Self::parse_db(pci_ids),
                 })
             }
-            None => Err(PciDatabaseError::FileNotFound),
+            None => Err(Error::FileNotFound),
         }
     }
 
-    pub fn get_online() -> Result<Self, PciDatabaseError> {
-        let _ = env_logger::builder().is_test(true).try_init();
-
-        let raw = reqwest::blocking::get("https://pci-ids.ucw.cz/v2.2/pci.ids")
-            .unwrap()
-            .text()
-            .unwrap();
+    #[cfg(feature = "online")]
+    pub fn get_online() -> Result<Self, Error> {
+        let raw = ureq::get("https://pci-ids.ucw.cz/v2.2/pci.ids")
+            .call()?
+            .into_string()?;
 
         let vendors = Self::parse_db(raw);
 
         Ok(PciDatabase { vendors })
     }
 
-    fn parse_db(pci_ids: String) -> BTreeMap<String, PciVendor> {
+    pub fn parse_db(pci_ids: String) -> BTreeMap<String, PciVendor> {
         let mut vendors: BTreeMap<String, PciVendor> = BTreeMap::new();
 
         let mut lines = pci_ids.split("\n").into_iter();
@@ -115,13 +113,16 @@ impl PciDatabase {
             }
         }
 
+        trace!("db size: {}", size_of_val(&vendors));
+
         vendors
     }
 
     fn read_pci_db() -> Option<String> {
-        let paths = ["/usr/share/hwdata/pci.ids", "/usr/share/misc/pci.ids"];
-
-        if let Some(path) = paths.iter().find(|path| Path::exists(&PathBuf::from(path))) {
+        if let Some(path) = DB_PATHS
+            .iter()
+            .find(|path| Path::exists(&PathBuf::from(path)))
+        {
             let all_ids = fs::read_to_string(path).unwrap();
 
             Some(all_ids)
@@ -147,30 +148,30 @@ impl PciDatabase {
         let mut card_vendor = None;
         let mut card_model = None;
 
-        log::trace!("Seacrhing vendor {}", vendor_id);
+        trace!("Seacrhing vendor {}", vendor_id);
         if let Some(vendor) = self.vendors.get(&vendor_id) {
-            log::trace!("Found vendor {}", vendor.name);
+            trace!("Found vendor {}", vendor.name);
             gpu_vendor = Some(vendor.name.clone());
 
-            log::trace!("Searching device {}", model_id);
+            trace!("Searching device {}", model_id);
             if let Some(model) = vendor.devices.get(&model_id) {
-                log::trace!("Found device {}", model.name);
+                trace!("Found device {}", model.name);
                 gpu_model = Some(model.name.clone());
 
-                log::trace!(
+                trace!(
                     "Searching subdevice {} {}",
                     subsys_vendor_id,
                     subsys_model_id
                 );
                 if let Some(subvendor) = self.vendors.get(&subsys_vendor_id) {
-                    log::trace!("Found subvendor {}", subvendor.name);
+                    trace!("Found subvendor {}", subvendor.name);
                     card_vendor = Some(subvendor.name.clone());
                 }
                 if let Some(subdevice) = model
                     .subdevices
                     .get(&format!("{} {}", subsys_vendor_id, subsys_model_id))
                 {
-                    log::trace!("Found subdevice {}", subdevice);
+                    trace!("Found subdevice {}", subdevice);
                     card_model = Some(subdevice.to_owned());
                 }
             }
@@ -185,7 +186,7 @@ impl PciDatabase {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct PciVendor {
     pub name: String,
     pub devices: BTreeMap<String, PciDevice>,
@@ -200,7 +201,7 @@ impl PciVendor {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct PciDevice {
     pub name: String,
     pub subdevices: BTreeMap<String, String>, // <"vendor_id device_id", name>
@@ -220,13 +221,24 @@ mod tests {
     use super::*;
 
     fn init() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt().init();
     }
 
     #[test]
-    fn parse_polaris() {
+    fn parse_polaris_local() {
         init();
         let db = PciDatabase::read().unwrap();
+        parse_polaris(db);
+    }
+
+    #[cfg(feature = "online")]
+    #[test]
+    fn parse_polaris_online() {
+        let db = PciDatabase::get_online().unwrap();
+        parse_polaris(db);
+    }
+
+    fn parse_polaris(db: PciDatabase) {
         let data = db.get_by_ids("1002", "67DF", "1DA2", "E387").unwrap();
 
         assert_eq!(
@@ -241,7 +253,9 @@ mod tests {
             data.card_vendor,
             Some("Sapphire Technology Limited".to_string())
         );
-        assert_eq!(data.card_model, Some("Radeon RX 570 Pulse 4GB".to_string()));
+        // Depending on the pci.ids version shipped this may be different
+        let card_model = data.card_model.unwrap();
+        assert!(card_model == "Radeon RX 570 Pulse 4GB" || card_model == "Radeon RX 580 Pulse 4GB");
     }
 
     #[test]
