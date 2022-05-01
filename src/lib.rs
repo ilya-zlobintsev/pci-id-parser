@@ -58,16 +58,16 @@ impl Database {
         let mut buf = String::new();
 
         while reader.read_line(&mut buf)? != 0 {
-            if !(buf.starts_with("#") | buf.is_empty() | (buf == "\n")) {
+            if !(buf.starts_with('#') | buf.is_empty() | (buf == "\n")) {
                 // Subdevice
                 if buf.starts_with("\t\t") {
                     let current_device = current_device
                         .as_mut()
-                        .ok_or_else(|| Error::no_current_device())?;
+                        .ok_or_else(Error::no_current_device)?;
 
                     let (mut sub, name) = drain_id_and_name(&mut buf)?;
 
-                    let sub_offset = sub.find(" ").unwrap_or_else(|| sub.len());
+                    let sub_offset = sub.find(' ').unwrap_or(sub.len());
                     let start = get_actual_buf_start(&sub);
                     let subvendor = sub.drain(start..sub_offset).collect();
                     let start = get_actual_buf_start(&sub);
@@ -81,12 +81,12 @@ impl Database {
                     current_device.subdevices.insert(subdevice_id, name);
 
                 // Device
-                } else if buf.starts_with("\t") {
+                } else if buf.starts_with('\t') {
                     // Device section is over, write to vendor
                     if let Some(device) = current_device {
                         let current_vendor = current_vendor
                             .as_mut()
-                            .ok_or_else(|| Error::no_current_vendor())?;
+                            .ok_or_else(Error::no_current_vendor)?;
 
                         current_vendor
                             .devices
@@ -108,7 +108,7 @@ impl Database {
                     if let Some(device) = current_device {
                         let vendor = current_vendor
                             .as_mut()
-                            .ok_or_else(|| Error::no_current_vendor())?;
+                            .ok_or_else(Error::no_current_vendor)?;
                         vendor.devices.insert(current_device_id.unwrap(), device);
                     }
                     if let Some(vendor) = current_vendor {
@@ -133,7 +133,7 @@ impl Database {
         if let Some(device) = current_device {
             let vendor = current_vendor
                 .as_mut()
-                .ok_or_else(|| Error::no_current_vendor())?;
+                .ok_or_else(Error::no_current_vendor)?;
             vendor.devices.insert(current_device_id.unwrap(), device);
         }
         if let Some(vendor) = current_vendor {
@@ -196,7 +196,7 @@ impl Database {
 
                 let subdevice_id = SubDeviceId {
                     subvendor: subsys_vendor_id.to_owned(),
-                    subdevice: subsys_model_id.to_owned(),
+                    subdevice: subsys_model_id,
                 };
 
                 subdevice_name = device.subdevices.get(&subdevice_id).map(|s| s.as_str());
@@ -251,17 +251,17 @@ pub struct SubDeviceId {
 const SPLIT: &str = "  ";
 
 fn drain_id_and_name(buf: &mut String) -> Result<(String, String), Error> {
-    let start = get_actual_buf_start(&buf);
+    let start = get_actual_buf_start(buf);
     let split_offset = buf.find(SPLIT).ok_or_else(|| {
-        Error::ParseError(format!(
+        Error::Parse(format!(
             "missing delimiter between vendor id and name in line {buf}"
         ))
     })?;
     let mut id: String = buf.drain(start..split_offset).collect();
     id.make_ascii_lowercase();
 
-    let start = get_actual_buf_start(&buf);
-    let end = buf.find("\n").unwrap_or_else(|| buf.len());
+    let start = get_actual_buf_start(buf);
+    let end = buf.find('\n').unwrap_or(buf.len());
     let name = buf.drain(start..end).collect();
 
     Ok((id, name))
