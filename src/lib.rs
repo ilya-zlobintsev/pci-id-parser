@@ -3,12 +3,15 @@ mod error;
 use error::Error;
 use std::{
     collections::HashMap,
-    fs,
+    fs::File,
+    io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
 };
 use tracing::trace;
 
 const DB_PATHS: &[&str] = &["/usr/share/hwdata/pci.ids", "/usr/share/misc/pci.ids"];
+#[cfg(feature = "online")]
+const URL: &str = "https://pci-ids.ucw.cz/v2.2/pci.ids";
 
 #[derive(Debug)]
 pub enum VendorDataError {
@@ -16,146 +19,170 @@ pub enum VendorDataError {
 }
 
 #[derive(Default, Clone, Debug)]
-pub struct VendorData {
-    pub gpu_vendor: Option<String>,
-    pub gpu_model: Option<String>,
-    pub card_vendor: Option<String>,
-    pub card_model: Option<String>,
+pub struct DeviceInfo<'a> {
+    pub vendor_name: Option<&'a str>,
+    pub device_name: Option<&'a str>,
+    pub subvendor_name: Option<&'a str>,
+    pub subdevice_name: Option<&'a str>,
 }
 
 #[derive(Debug)]
-pub struct PciDatabase {
-    pub vendors: HashMap<String, PciVendor>,
+pub struct Database {
+    pub vendors: HashMap<String, Vendor>,
 }
 
-impl PciDatabase {
+impl Database {
     pub fn read() -> Result<Self, Error> {
-        match Self::read_pci_db() {
-            Some(pci_ids) => {
-                trace!("Parsing pci.ids");
-                Ok(PciDatabase {
-                    vendors: Self::parse_db(pci_ids),
-                })
-            }
-            None => Err(Error::FileNotFound),
-        }
+        let file = Self::open_file()?;
+        Self::parse_db(file)
     }
 
     #[cfg(feature = "online")]
     pub fn get_online() -> Result<Self, Error> {
-        let raw = ureq::get("https://pci-ids.ucw.cz/v2.2/pci.ids")
-            .call()?
-            .into_string()?;
+        let response = ureq::get(URL).call()?;
 
-        let vendors = Self::parse_db(raw);
-
-        Ok(PciDatabase { vendors })
+        Self::parse_db(response.into_reader())
     }
 
-    pub fn parse_db(pci_ids: String) -> HashMap<String, PciVendor> {
-        let mut vendors: HashMap<String, PciVendor> = HashMap::with_capacity(2500);
+    pub fn parse_db<R: Read>(reader: R) -> Result<Self, Error> {
+        let mut reader = BufReader::new(reader);
 
-        let mut lines = pci_ids.split("\n").into_iter();
+        let mut vendors: HashMap<String, Vendor> = HashMap::with_capacity(2500);
 
+        let mut current_vendor: Option<Vendor> = None;
         let mut current_vendor_id: Option<String> = None;
+
+        let mut current_device: Option<Device> = None;
         let mut current_device_id: Option<String> = None;
 
-        while let Some(line) = lines.next() {
-            if line.starts_with("#") | line.is_empty() {
-                continue;
-            } else if line.starts_with("\t\t") {
-                let mut split = line.split_whitespace();
+        let mut buf = String::new();
 
-                let vendor_id = split.next().unwrap().to_owned();
-                let device_id = split.next().unwrap().to_owned();
-                let name = split.collect::<Vec<&str>>().join(" ");
+        while reader.read_line(&mut buf)? != 0 {
+            if !(buf.starts_with("#") | buf.is_empty() | (buf == "\n")) {
+                // Subdevice
+                if buf.starts_with("\t\t") {
+                    let current_device = current_device
+                        .as_mut()
+                        .ok_or_else(|| Error::no_current_device())?;
 
-                if let Some(current_vendor_id) = &current_vendor_id {
-                    if let Some(current_device_id) = &current_device_id {
-                        vendors
-                            .get_mut(current_vendor_id)
-                            .unwrap()
+                    let (mut sub, name) = drain_id_and_name(&mut buf)?;
+
+                    let sub_offset = sub.find(" ").unwrap_or_else(|| sub.len());
+                    let start = get_actual_buf_start(&sub);
+                    let subvendor = sub.drain(start..sub_offset).collect();
+                    let start = get_actual_buf_start(&sub);
+                    let subdevice = sub.drain(start..).collect();
+
+                    let subdevice_id = SubDeviceId {
+                        subvendor,
+                        subdevice,
+                    };
+
+                    current_device.subdevices.insert(subdevice_id, name);
+
+                // Device
+                } else if buf.starts_with("\t") {
+                    // Device section is over, write to vendor
+                    if let Some(device) = current_device {
+                        let current_vendor = current_vendor
+                            .as_mut()
+                            .ok_or_else(|| Error::no_current_vendor())?;
+
+                        current_vendor
                             .devices
-                            .get_mut(current_device_id)
-                            .unwrap()
-                            .subdevices
-                            .insert(format!("{} {}", vendor_id, device_id), name);
+                            .insert(current_device_id.unwrap(), device);
                     }
+
+                    let (id, name) = drain_id_and_name(&mut buf)?;
+
+                    let device = Device {
+                        name,
+                        subdevices: HashMap::new(),
+                    };
+
+                    current_device = Some(device);
+                    current_device_id = Some(id);
+                // Vendor
+                } else {
+                    // The vendor section is complete so it needs to be pushed to the main list
+                    if let Some(device) = current_device {
+                        let vendor = current_vendor
+                            .as_mut()
+                            .ok_or_else(|| Error::no_current_vendor())?;
+                        vendor.devices.insert(current_device_id.unwrap(), device);
+                    }
+                    if let Some(vendor) = current_vendor {
+                        vendors.insert(current_vendor_id.unwrap(), vendor);
+                    }
+
+                    let (id, name) = drain_id_and_name(&mut buf)?;
+
+                    let vendor = Vendor {
+                        name,
+                        devices: HashMap::new(),
+                    };
+                    current_vendor = Some(vendor);
+                    current_vendor_id = Some(id);
+                    current_device = None;
+                    current_device_id = None;
                 }
-            } else if line.starts_with("\t") {
-                let mut split = line.split_whitespace();
-
-                let id = split.next().unwrap().to_owned();
-                let name = split.collect::<Vec<&str>>().join(" ");
-
-                let device = PciDevice::new(name);
-
-                current_device_id = Some(id.clone());
-
-                if let Some(current_vendor_id) = &current_vendor_id {
-                    vendors
-                        .get_mut(current_vendor_id)
-                        .unwrap()
-                        .devices
-                        .insert(id, device);
-                }
-            } else {
-                let mut split = line.split_whitespace();
-
-                let id = split.next().unwrap().to_owned();
-                let name = split.collect::<Vec<&str>>().join(" ");
-
-                current_vendor_id = Some(id.clone());
-
-                let vendor = PciVendor::new(name);
-                vendors.insert(id, vendor);
+                debug_assert!(buf.trim().is_empty());
             }
+            buf.clear();
         }
+        if let Some(device) = current_device {
+            let vendor = current_vendor
+                .as_mut()
+                .ok_or_else(|| Error::no_current_vendor())?;
+            vendor.devices.insert(current_device_id.unwrap(), device);
+        }
+        if let Some(vendor) = current_vendor {
+            vendors.insert(current_vendor_id.unwrap(), vendor);
+        }
+
         vendors.shrink_to_fit();
         trace!("db len: {}", vendors.len());
 
-        vendors
+        Ok(Self { vendors })
     }
 
-    fn read_pci_db() -> Option<String> {
+    fn open_file() -> Result<File, Error> {
         if let Some(path) = DB_PATHS
             .iter()
             .find(|path| Path::exists(&PathBuf::from(path)))
         {
-            let all_ids = fs::read_to_string(path).unwrap();
-
-            Some(all_ids)
+            Ok(File::open(path)?)
         } else {
-            None
+            Err(Error::FileNotFound)
         }
     }
 
-    pub fn get_by_ids(
-        &self,
+    pub fn get_device_info<'a>(
+        &'a self,
         vendor_id: &str,
         model_id: &str,
         subsys_vendor_id: &str,
         subsys_model_id: &str,
-    ) -> Result<VendorData, VendorDataError> {
+    ) -> DeviceInfo<'a> {
         let vendor_id = vendor_id.to_lowercase();
         let model_id = model_id.to_lowercase();
         let subsys_vendor_id = subsys_vendor_id.to_lowercase();
         let subsys_model_id = subsys_model_id.to_lowercase();
 
-        let mut gpu_vendor = None;
-        let mut gpu_model = None;
-        let mut card_vendor = None;
-        let mut card_model = None;
+        let mut vendor_name = None;
+        let mut device_name = None;
+        let mut subvendor_name = None;
+        let mut subdevice_name = None;
 
-        trace!("Seacrhing vendor {}", vendor_id);
+        trace!("Searching vendor {}", vendor_id);
         if let Some(vendor) = self.vendors.get(&vendor_id) {
             trace!("Found vendor {}", vendor.name);
-            gpu_vendor = Some(vendor.name.clone());
+            vendor_name = Some(vendor.name.as_str());
 
             trace!("Searching device {}", model_id);
-            if let Some(model) = vendor.devices.get(&model_id) {
-                trace!("Found device {}", model.name);
-                gpu_model = Some(model.name.clone());
+            if let Some(device) = vendor.devices.get(&model_id) {
+                trace!("Found device {}", device.name);
+                device_name = Some(device.name.as_str());
 
                 trace!(
                     "Searching subdevice {} {}",
@@ -164,36 +191,36 @@ impl PciDatabase {
                 );
                 if let Some(subvendor) = self.vendors.get(&subsys_vendor_id) {
                     trace!("Found subvendor {}", subvendor.name);
-                    card_vendor = Some(subvendor.name.clone());
+                    subvendor_name = Some(subvendor.name.as_str());
                 }
-                if let Some(subdevice) = model
-                    .subdevices
-                    .get(&format!("{} {}", subsys_vendor_id, subsys_model_id))
-                {
-                    trace!("Found subdevice {}", subdevice);
-                    card_model = Some(subdevice.to_owned());
-                }
+
+                let subdevice_id = SubDeviceId {
+                    subvendor: subsys_vendor_id.to_owned(),
+                    subdevice: subsys_model_id.to_owned(),
+                };
+
+                subdevice_name = device.subdevices.get(&subdevice_id).map(|s| s.as_str());
             }
         }
 
-        Ok(VendorData {
-            gpu_vendor,
-            gpu_model,
-            card_vendor,
-            card_model,
-        })
+        DeviceInfo {
+            vendor_name,
+            device_name,
+            subvendor_name,
+            subdevice_name,
+        }
     }
 }
 
 #[derive(Debug)]
-pub struct PciVendor {
+pub struct Vendor {
     pub name: String,
-    pub devices: HashMap<String, PciDevice>,
+    pub devices: HashMap<String, Device>,
 }
 
-impl PciVendor {
+impl Vendor {
     pub fn new(name: String) -> Self {
-        PciVendor {
+        Vendor {
             name,
             devices: HashMap::new(),
         }
@@ -201,76 +228,133 @@ impl PciVendor {
 }
 
 #[derive(Debug, Clone)]
-pub struct PciDevice {
+pub struct Device {
     pub name: String,
-    pub subdevices: HashMap<String, String>, // <"vendor_id device_id", name>
+    pub subdevices: HashMap<SubDeviceId, String>,
 }
 
-impl PciDevice {
+impl Device {
     pub fn new(name: String) -> Self {
-        PciDevice {
+        Device {
             name,
             subdevices: HashMap::new(),
         }
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SubDeviceId {
+    pub subvendor: String,
+    pub subdevice: String,
+}
+
+const SPLIT: &str = "  ";
+
+fn drain_id_and_name(buf: &mut String) -> Result<(String, String), Error> {
+    let start = get_actual_buf_start(&buf);
+    let split_offset = buf.find(SPLIT).ok_or_else(|| {
+        Error::ParseError(format!(
+            "missing delimiter between vendor id and name in line {buf}"
+        ))
+    })?;
+    let mut id: String = buf.drain(start..split_offset).collect();
+    id.make_ascii_lowercase();
+
+    let start = get_actual_buf_start(&buf);
+    let end = buf.find("\n").unwrap_or_else(|| buf.len());
+    let name = buf.drain(start..end).collect();
+
+    Ok((id, name))
+}
+
+fn get_actual_buf_start(buf: &str) -> usize {
+    let mut start = 0;
+    for (i, c) in buf.chars().enumerate() {
+        if !c.is_whitespace() {
+            start = i;
+            break;
+        }
+    }
+    start
+}
+
 #[cfg(test)]
 mod tests {
+    use tracing::Level;
+
     use super::*;
 
+    #[test]
     fn init() {
-        let _ = tracing_subscriber::fmt().init();
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(Level::TRACE)
+            .init();
     }
 
     #[test]
     fn parse_polaris_local() {
-        init();
-        let db = PciDatabase::read().unwrap();
+        let db = Database::read().unwrap();
         parse_polaris(db);
     }
 
     #[cfg(feature = "online")]
     #[test]
     fn parse_polaris_online() {
-        let db = PciDatabase::get_online().unwrap();
+        let db = Database::get_online().unwrap();
         parse_polaris(db);
     }
 
-    fn parse_polaris(db: PciDatabase) {
-        let data = db.get_by_ids("1002", "67DF", "1DA2", "E387").unwrap();
+    fn parse_polaris(db: Database) {
+        let data = db.get_device_info("1002", "67DF", "1DA2", "E387");
 
         assert_eq!(
-            data.gpu_vendor,
-            Some("Advanced Micro Devices, Inc. [AMD/ATI]".to_string())
+            data.vendor_name,
+            Some("Advanced Micro Devices, Inc. [AMD/ATI]"),
         );
         assert_eq!(
-            data.gpu_model,
-            Some("Ellesmere [Radeon RX 470/480/570/570X/580/580X/590]".to_string())
+            data.device_name,
+            Some("Ellesmere [Radeon RX 470/480/570/570X/580/580X/590]"),
         );
-        assert_eq!(
-            data.card_vendor,
-            Some("Sapphire Technology Limited".to_string())
-        );
+        assert_eq!(data.subvendor_name, Some("Sapphire Technology Limited"));
         // Depending on the pci.ids version shipped this may be different
-        let card_model = data.card_model.unwrap();
+        let card_model = data.subdevice_name.unwrap();
         assert!(card_model == "Radeon RX 570 Pulse 4GB" || card_model == "Radeon RX 580 Pulse 4GB");
     }
 
     #[test]
     fn parse_vega() {
-        let db = PciDatabase::read().unwrap();
-        let data = db.get_by_ids("1002", "687F", "1043", "0555").unwrap();
+        let db = Database::read().unwrap();
+        let data = db.get_device_info("1002", "687F", "1043", "0555");
 
         assert_eq!(
-            data.gpu_vendor,
-            Some("Advanced Micro Devices, Inc. [AMD/ATI]".to_string())
+            data.vendor_name,
+            Some("Advanced Micro Devices, Inc. [AMD/ATI]")
         );
         assert_eq!(
-            data.gpu_model,
-            Some("Vega 10 XL/XT [Radeon RX Vega 56/64]".to_string())
+            data.device_name,
+            Some("Vega 10 XL/XT [Radeon RX Vega 56/64]")
         );
-        assert_eq!(data.card_vendor, Some("ASUSTeK Computer Inc.".to_string()));
-        assert_eq!(data.card_model, None);
+        assert_eq!(data.subvendor_name, Some("ASUSTeK Computer Inc."));
+        assert_eq!(data.subdevice_name, None);
+    }
+
+    #[cfg(feature = "online")]
+    #[test]
+    fn parse_incomplete() {
+        let db = Database::get_online().unwrap();
+
+        let device_info = db.get_device_info("C 0c", "03", "fe", "");
+        trace!("{device_info:?}");
+        let expected_info = DeviceInfo {
+            vendor_name: Some("Serial bus controller"),
+            device_name: Some("USB controller"),
+            subvendor_name: None,
+            subdevice_name: Some("USB Device"),
+        };
+
+        assert_eq!(device_info.vendor_name, expected_info.vendor_name);
+        assert_eq!(device_info.device_name, expected_info.device_name);
+        assert_eq!(device_info.subvendor_name, expected_info.subvendor_name);
+        assert_eq!(device_info.subdevice_name, expected_info.subdevice_name);
     }
 }
