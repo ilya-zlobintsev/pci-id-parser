@@ -2,9 +2,8 @@ mod error;
 
 use error::Error;
 use std::{
-    collections::BTreeMap,
+    collections::HashMap,
     fs,
-    mem::size_of_val,
     path::{Path, PathBuf},
 };
 use tracing::trace;
@@ -26,7 +25,7 @@ pub struct VendorData {
 
 #[derive(Debug)]
 pub struct PciDatabase {
-    pub vendors: BTreeMap<String, PciVendor>,
+    pub vendors: HashMap<String, PciVendor>,
 }
 
 impl PciDatabase {
@@ -53,8 +52,8 @@ impl PciDatabase {
         Ok(PciDatabase { vendors })
     }
 
-    pub fn parse_db(pci_ids: String) -> BTreeMap<String, PciVendor> {
-        let mut vendors: BTreeMap<String, PciVendor> = BTreeMap::new();
+    pub fn parse_db(pci_ids: String) -> HashMap<String, PciVendor> {
+        let mut vendors: HashMap<String, PciVendor> = HashMap::with_capacity(2500);
 
         let mut lines = pci_ids.split("\n").into_iter();
 
@@ -112,8 +111,8 @@ impl PciDatabase {
                 vendors.insert(id, vendor);
             }
         }
-
-        trace!("db size: {}", size_of_val(&vendors));
+        vendors.shrink_to_fit();
+        trace!("db len: {}", vendors.len());
 
         vendors
     }
@@ -189,14 +188,14 @@ impl PciDatabase {
 #[derive(Debug)]
 pub struct PciVendor {
     pub name: String,
-    pub devices: BTreeMap<String, PciDevice>,
+    pub devices: HashMap<String, PciDevice>,
 }
 
 impl PciVendor {
     pub fn new(name: String) -> Self {
         PciVendor {
             name,
-            devices: BTreeMap::new(),
+            devices: HashMap::new(),
         }
     }
 }
@@ -204,14 +203,14 @@ impl PciVendor {
 #[derive(Debug, Clone)]
 pub struct PciDevice {
     pub name: String,
-    pub subdevices: BTreeMap<String, String>, // <"vendor_id device_id", name>
+    pub subdevices: HashMap<String, String>, // <"vendor_id device_id", name>
 }
 
 impl PciDevice {
     pub fn new(name: String) -> Self {
         PciDevice {
             name,
-            subdevices: BTreeMap::new(),
+            subdevices: HashMap::new(),
         }
     }
 }
