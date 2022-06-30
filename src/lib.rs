@@ -58,7 +58,10 @@ impl Database {
         let mut buf = String::new();
 
         while reader.read_line(&mut buf)? != 0 {
-            if !(buf.starts_with('#') | buf.is_empty() | (buf == "\n")) {
+            if buf.starts_with("C ") | buf.starts_with("c ") {
+                // Device classes, they're at the end of file and not yet supported
+                break;
+            } else if !(buf.starts_with('#') | buf.is_empty() | (buf == "\n")) {
                 // Subdevice
                 if buf.starts_with("\t\t") {
                     let current_device = current_device
@@ -212,7 +215,7 @@ impl Database {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Vendor {
     pub name: String,
     pub devices: HashMap<String, Device>,
@@ -227,7 +230,7 @@ impl Vendor {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Device {
     pub name: String,
     pub subdevices: HashMap<SubDeviceId, String>,
@@ -280,13 +283,13 @@ fn get_actual_buf_start(buf: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use tracing::Level;
-
     use super::*;
+    use pretty_assertions::assert_eq;
+    use tracing::Level;
 
     #[test]
     fn init() {
-        let _ = tracing_subscriber::fmt()
+        tracing_subscriber::fmt()
             .with_max_level(Level::TRACE)
             .init();
     }
@@ -336,6 +339,14 @@ mod tests {
         );
         assert_eq!(data.subvendor_name, Some("ASUSTeK Computer Inc."));
         assert_eq!(data.subdevice_name, None);
+    }
+
+    #[test]
+    fn class_not_in_vendors() {
+        let db = Database::read().unwrap();
+
+        assert_eq!(db.vendors.get("c"), None);
+        assert_eq!(db.vendors.get("c 09"), None);
     }
 
     #[cfg(feature = "online")]
