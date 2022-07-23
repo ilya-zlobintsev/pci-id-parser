@@ -13,6 +13,8 @@ use std::{
 };
 use tracing::trace;
 
+use crate::parser::{parse_class, parse_prog_if, parse_subclass};
+
 const DB_PATHS: &[&str] = &["/usr/share/hwdata/pci.ids", "/usr/share/misc/pci.ids"];
 #[cfg(feature = "online")]
 const URL: &str = "https://pci-ids.ucw.cz/v2.2/pci.ids";
@@ -25,6 +27,7 @@ pub enum VendorDataError {
 #[derive(Debug)]
 pub struct Database {
     pub vendors: HashMap<String, Vendor>,
+    pub classes: HashMap<String, Class>,
 }
 
 impl Database {
@@ -42,8 +45,7 @@ impl Database {
 
     pub fn parse_db<R: Read>(reader: R) -> Result<Self, Error> {
         let mut reader = BufReader::new(reader);
-
-        let mut vendors: HashMap<String, Vendor> = HashMap::with_capacity(2500);
+        let mut buf = String::new();
 
         let mut current_vendor: Option<(String, Vendor)> = None;
         let mut current_device: Option<(String, Device)> = None;
@@ -51,14 +53,14 @@ impl Database {
         let mut current_class: Option<(String, Class)> = None;
         let mut current_subclass: Option<(String, SubClass)> = None;
 
-        let mut buf = String::new();
+        let mut vendors: HashMap<String, Vendor> = HashMap::with_capacity(2500);
 
-        // Devices
         while reader.read_line(&mut buf)? != 0 {
-            if buf.starts_with("C ") | buf.starts_with("c ") {
-                // Device classes, they're at the end of file and not yet supported
+            if buf.starts_with("C ") || buf.starts_with("c ") {
+                // Proceed to parse classes
+                current_class = Some(parse_class(&mut buf)?);
                 break;
-            } else if !(buf.starts_with('#') | buf.is_empty() | (buf == "\n")) {
+            } else if !(buf.starts_with('#') || buf.is_empty() || (buf == "\n")) {
                 // Subdevice
                 if buf.starts_with("\t\t") {
                     let (_, current_device) = current_device
@@ -123,11 +125,55 @@ impl Database {
         if let Some((vendor_id, vendor)) = current_vendor {
             vendors.insert(vendor_id, vendor);
         }
+        buf.clear();
 
         vendors.shrink_to_fit();
-        trace!("db len: {}", vendors.len());
+        trace!("Parsed {} vendors", vendors.len());
 
-        Ok(Self { vendors })
+        let mut classes: HashMap<String, Class> = HashMap::with_capacity(200);
+
+        while reader.read_line(&mut buf)? != 0 {
+            if buf.starts_with("C ") || buf.starts_with("c ") {
+                if let Some((subclass_id, subclass)) = current_subclass {
+                    let (_, class) = current_class
+                        .as_mut()
+                        .ok_or_else(|| Error::no_current_class())?;
+
+                    class.subclasses.insert(subclass_id, subclass);
+                }
+                if let Some((class_id, class)) = current_class {
+                    classes.insert(class_id, class);
+                }
+
+                current_class = Some(parse_class(&mut buf)?);
+                current_subclass = None;
+            } else if buf.starts_with("\t\t") {
+                // Prog-if
+                let (id, name) = parse_prog_if(&mut buf)?;
+                let (_, subclass) = current_subclass
+                    .as_mut()
+                    .ok_or_else(|| Error::no_current_subclass())?;
+
+                subclass.prog_ifs.insert(id, name);
+            } else if buf.starts_with("\t") {
+                // Subclass
+                // Flush previous subclass
+                if let Some((subclass_id, subclass)) = current_subclass {
+                    let (_, class) = current_class
+                        .as_mut()
+                        .ok_or_else(|| Error::no_current_class())?;
+
+                    class.subclasses.insert(subclass_id, subclass);
+                }
+                current_subclass = Some(parse_subclass(&mut buf)?);
+            }
+            buf.clear();
+        }
+        classes.shrink_to_fit();
+
+        trace!("Parsed {} classes", classes.len());
+
+        Ok(Self { vendors, classes })
     }
 
     fn open_file() -> Result<File, Error> {
@@ -203,7 +249,7 @@ mod tests {
     use tracing::Level;
 
     #[test]
-    fn init() {
+    fn init_tracing() {
         tracing_subscriber::fmt()
             .with_max_level(Level::TRACE)
             .init();
