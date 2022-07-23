@@ -1,6 +1,8 @@
 mod error;
+pub mod schema;
 
 use error::Error;
+use schema::{Device, DeviceInfo, SubDeviceId, Vendor};
 use std::{
     collections::HashMap,
     fs::File,
@@ -16,14 +18,6 @@ const URL: &str = "https://pci-ids.ucw.cz/v2.2/pci.ids";
 #[derive(Debug)]
 pub enum VendorDataError {
     MissingIdsFile,
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct DeviceInfo<'a> {
-    pub vendor_name: Option<&'a str>,
-    pub device_name: Option<&'a str>,
-    pub subvendor_name: Option<&'a str>,
-    pub subdevice_name: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -49,11 +43,8 @@ impl Database {
 
         let mut vendors: HashMap<String, Vendor> = HashMap::with_capacity(2500);
 
-        let mut current_vendor: Option<Vendor> = None;
-        let mut current_vendor_id: Option<String> = None;
-
-        let mut current_device: Option<Device> = None;
-        let mut current_device_id: Option<String> = None;
+        let mut current_vendor: Option<(String, Vendor)> = None;
+        let mut current_device: Option<(String, Device)> = None;
 
         let mut buf = String::new();
 
@@ -64,7 +55,7 @@ impl Database {
             } else if !(buf.starts_with('#') | buf.is_empty() | (buf == "\n")) {
                 // Subdevice
                 if buf.starts_with("\t\t") {
-                    let current_device = current_device
+                    let (_, current_device) = current_device
                         .as_mut()
                         .ok_or_else(Error::no_current_device)?;
 
@@ -86,14 +77,12 @@ impl Database {
                 // Device
                 } else if buf.starts_with('\t') {
                     // Device section is over, write to vendor
-                    if let Some(device) = current_device {
-                        let current_vendor = current_vendor
+                    if let Some((device_id, device)) = current_device {
+                        let (_, current_vendor) = current_vendor
                             .as_mut()
                             .ok_or_else(Error::no_current_vendor)?;
 
-                        current_vendor
-                            .devices
-                            .insert(current_device_id.unwrap(), device);
+                        current_vendor.devices.insert(device_id, device);
                     }
 
                     let (id, name) = drain_id_and_name(&mut buf)?;
@@ -103,44 +92,41 @@ impl Database {
                         subdevices: HashMap::new(),
                     };
 
-                    current_device = Some(device);
-                    current_device_id = Some(id);
+                    current_device = Some((id, device));
                 // Vendor
                 } else {
                     // The vendor section is complete so it needs to be pushed to the main list
-                    if let Some(device) = current_device {
-                        let vendor = current_vendor
+                    if let Some((device_id, device)) = current_device {
+                        let (_, vendor) = current_vendor
                             .as_mut()
                             .ok_or_else(Error::no_current_vendor)?;
-                        vendor.devices.insert(current_device_id.unwrap(), device);
+                        vendor.devices.insert(device_id, device);
                     }
-                    if let Some(vendor) = current_vendor {
-                        vendors.insert(current_vendor_id.unwrap(), vendor);
+                    if let Some((vendor_id, vendor)) = current_vendor {
+                        vendors.insert(vendor_id, vendor);
                     }
 
-                    let (id, name) = drain_id_and_name(&mut buf)?;
+                    let (vendor_id, name) = drain_id_and_name(&mut buf)?;
 
                     let vendor = Vendor {
                         name,
                         devices: HashMap::new(),
                     };
-                    current_vendor = Some(vendor);
-                    current_vendor_id = Some(id);
+                    current_vendor = Some((vendor_id, vendor));
                     current_device = None;
-                    current_device_id = None;
                 }
                 debug_assert!(buf.trim().is_empty());
             }
             buf.clear();
         }
-        if let Some(device) = current_device {
-            let vendor = current_vendor
+        if let Some((device_id, device)) = current_device {
+            let (_, vendor) = current_vendor
                 .as_mut()
                 .ok_or_else(Error::no_current_vendor)?;
-            vendor.devices.insert(current_device_id.unwrap(), device);
+            vendor.devices.insert(device_id, device);
         }
-        if let Some(vendor) = current_vendor {
-            vendors.insert(current_vendor_id.unwrap(), vendor);
+        if let Some((vendor_id, vendor)) = current_vendor {
+            vendors.insert(vendor_id, vendor);
         }
 
         vendors.shrink_to_fit();
@@ -215,42 +201,6 @@ impl Database {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub struct Vendor {
-    pub name: String,
-    pub devices: HashMap<String, Device>,
-}
-
-impl Vendor {
-    pub fn new(name: String) -> Self {
-        Vendor {
-            name,
-            devices: HashMap::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Device {
-    pub name: String,
-    pub subdevices: HashMap<SubDeviceId, String>,
-}
-
-impl Device {
-    pub fn new(name: String) -> Self {
-        Device {
-            name,
-            subdevices: HashMap::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SubDeviceId {
-    pub subvendor: String,
-    pub subdevice: String,
-}
-
 const SPLIT: &str = "  ";
 
 fn drain_id_and_name(buf: &mut String) -> Result<(String, String), Error> {
@@ -271,14 +221,12 @@ fn drain_id_and_name(buf: &mut String) -> Result<(String, String), Error> {
 }
 
 fn get_actual_buf_start(buf: &str) -> usize {
-    let mut start = 0;
     for (i, c) in buf.chars().enumerate() {
         if !c.is_whitespace() {
-            start = i;
-            break;
+            return i;
         }
     }
-    start
+    0
 }
 
 #[cfg(test)]
