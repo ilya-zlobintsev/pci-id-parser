@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::Hash};
 
 #[derive(Default, Clone, Debug)]
 pub struct DeviceInfo<'a> {
@@ -42,4 +42,16 @@ impl Device {
 pub struct SubDeviceId {
     pub subvendor: String,
     pub subdevice: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Class {
+    pub name: String,
+    pub subclasses: HashMap<String, SubClass>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubClass {
+    pub name: String,
+    pub prog_ifs: HashMap<String, String>,
 }

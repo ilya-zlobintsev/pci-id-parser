@@ -1,8 +1,10 @@
 mod error;
+mod parser;
 pub mod schema;
 
 use error::Error;
-use schema::{Device, DeviceInfo, SubDeviceId, Vendor};
+use parser::{drain_id_and_name, parse_subdevice_id};
+use schema::{Class, Device, DeviceInfo, SubClass, SubDeviceId, Vendor};
 use std::{
     collections::HashMap,
     fs::File,
@@ -46,8 +48,12 @@ impl Database {
         let mut current_vendor: Option<(String, Vendor)> = None;
         let mut current_device: Option<(String, Device)> = None;
 
+        let mut current_class: Option<(String, Class)> = None;
+        let mut current_subclass: Option<(String, SubClass)> = None;
+
         let mut buf = String::new();
 
+        // Devices
         while reader.read_line(&mut buf)? != 0 {
             if buf.starts_with("C ") | buf.starts_with("c ") {
                 // Device classes, they're at the end of file and not yet supported
@@ -59,18 +65,7 @@ impl Database {
                         .as_mut()
                         .ok_or_else(Error::no_current_device)?;
 
-                    let (mut sub, name) = drain_id_and_name(&mut buf)?;
-
-                    let sub_offset = sub.find(' ').unwrap_or(sub.len());
-                    let start = get_actual_buf_start(&sub);
-                    let subvendor = sub.drain(start..sub_offset).collect();
-                    let start = get_actual_buf_start(&sub);
-                    let subdevice = sub.drain(start..).collect();
-
-                    let subdevice_id = SubDeviceId {
-                        subvendor,
-                        subdevice,
-                    };
+                    let (name, subdevice_id) = parse_subdevice_id(&mut buf)?;
 
                     current_device.subdevices.insert(subdevice_id, name);
 
@@ -199,34 +194,6 @@ impl Database {
             subdevice_name,
         }
     }
-}
-
-const SPLIT: &str = "  ";
-
-fn drain_id_and_name(buf: &mut String) -> Result<(String, String), Error> {
-    let start = get_actual_buf_start(buf);
-    let split_offset = buf.find(SPLIT).ok_or_else(|| {
-        Error::Parse(format!(
-            "missing delimiter between vendor id and name in line {buf}"
-        ))
-    })?;
-    let mut id: String = buf.drain(start..split_offset).collect();
-    id.make_ascii_lowercase();
-
-    let start = get_actual_buf_start(buf);
-    let end = buf.find('\n').unwrap_or(buf.len());
-    let name = buf.drain(start..end).collect();
-
-    Ok((id, name))
-}
-
-fn get_actual_buf_start(buf: &str) -> usize {
-    for (i, c) in buf.chars().enumerate() {
-        if !c.is_whitespace() {
-            return i;
-        }
-    }
-    0
 }
 
 #[cfg(test)]
