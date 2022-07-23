@@ -39,7 +39,14 @@ pub fn parse_class(buf: &mut String) -> Result<(String, Class), Error> {
         id.push(c);
     }
 
-    let name = drain.collect();
+    let mut name = String::new();
+
+    while let Some(c) = drain.next() {
+        if c == '\n' {
+            break;
+        }
+        name.push(c);
+    }
 
     let class = Class {
         name,
