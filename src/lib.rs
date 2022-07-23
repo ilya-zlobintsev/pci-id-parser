@@ -1,3 +1,5 @@
+#![warn(clippy::pedantic)]
+#![doc = include_str!("../README.md")]
 mod error;
 mod parser;
 pub mod schema;
@@ -31,11 +33,19 @@ pub struct Database {
 }
 
 impl Database {
+    /// Attempt to read the database from a list of known file paths
+    ///
+    /// # Errors
+    /// Returns an error when either no file could be found or the parsing fails.
     pub fn read() -> Result<Self, Error> {
         let file = Self::open_file()?;
         Self::parse_db(file)
     }
 
+    /// Fetch a database from an online source
+    ///
+    /// # Errors
+    /// Returns an error when the database either can't be fetched or parsed
     #[cfg(feature = "online")]
     pub fn get_online() -> Result<Self, Error> {
         let response = ureq::get(URL).call()?;
@@ -43,6 +53,10 @@ impl Database {
         Self::parse_db(response.into_reader())
     }
 
+    /// Parse a database from the given reader
+    ///
+    /// # Errors
+    /// Returns an error whenever there's a parsing error
     pub fn parse_db<R: Read>(reader: R) -> Result<Self, Error> {
         let mut reader = BufReader::new(reader);
         let mut buf = String::new();
@@ -135,9 +149,7 @@ impl Database {
         while reader.read_line(&mut buf)? != 0 {
             if buf.starts_with("C ") || buf.starts_with("c ") {
                 if let Some((subclass_id, subclass)) = current_subclass {
-                    let (_, class) = current_class
-                        .as_mut()
-                        .ok_or_else(|| Error::no_current_class())?;
+                    let (_, class) = current_class.as_mut().ok_or_else(Error::no_current_class)?;
 
                     class.subclasses.insert(subclass_id, subclass);
                 }
@@ -152,16 +164,14 @@ impl Database {
                 let (id, name) = parse_prog_if(&mut buf)?;
                 let (_, subclass) = current_subclass
                     .as_mut()
-                    .ok_or_else(|| Error::no_current_subclass())?;
+                    .ok_or_else(Error::no_current_subclass)?;
 
                 subclass.prog_ifs.insert(id, name);
-            } else if buf.starts_with("\t") {
+            } else if buf.starts_with('\t') {
                 // Subclass
                 // Flush previous subclass
                 if let Some((subclass_id, subclass)) = current_subclass {
-                    let (_, class) = current_class
-                        .as_mut()
-                        .ok_or_else(|| Error::no_current_class())?;
+                    let (_, class) = current_class.as_mut().ok_or_else(Error::no_current_class)?;
 
                     class.subclasses.insert(subclass_id, subclass);
                 }
@@ -187,6 +197,7 @@ impl Database {
         }
     }
 
+    #[must_use]
     pub fn get_device_info<'a>(
         &'a self,
         vendor_id: &str,
@@ -225,11 +236,11 @@ impl Database {
                 }
 
                 let subdevice_id = SubDeviceId {
-                    subvendor: subsys_vendor_id.to_owned(),
+                    subvendor: subsys_vendor_id.clone(),
                     subdevice: subsys_model_id,
                 };
 
-                subdevice_name = device.subdevices.get(&subdevice_id).map(|s| s.as_str());
+                subdevice_name = device.subdevices.get(&subdevice_id).map(String::as_str);
             }
         }
 

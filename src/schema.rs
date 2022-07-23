@@ -14,28 +14,10 @@ pub struct Vendor {
     pub devices: HashMap<String, Device>,
 }
 
-impl Vendor {
-    pub fn new(name: String) -> Self {
-        Vendor {
-            name,
-            devices: HashMap::new(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Device {
     pub name: String,
     pub subdevices: HashMap<SubDeviceId, String>,
-}
-
-impl Device {
-    pub fn new(name: String) -> Self {
-        Device {
-            name,
-            subdevices: HashMap::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
