@@ -42,6 +42,15 @@ impl Database {
         Self::parse_db(file)
     }
 
+    /// Read the database from a given path
+    ///
+    /// # Errors
+    /// Returns an error when the file can't be read or when parsing fails
+    pub fn read_from_file<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        let file = File::open(path)?;
+        Self::parse_db(file)
+    }
+
     /// Fetch a database from an online source
     ///
     /// # Errors
