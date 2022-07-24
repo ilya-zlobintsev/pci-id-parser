@@ -1,6 +1,12 @@
+#![warn(clippy::pedantic)]
+#![doc = include_str!("../README.md")]
 mod error;
+mod parser;
+pub mod schema;
 
 use error::Error;
+use parser::{drain_id_and_name, parse_subdevice_id};
+use schema::{Class, Device, DeviceInfo, SubClass, SubDeviceId, Vendor};
 use std::{
     collections::HashMap,
     fs::File,
@@ -8,6 +14,8 @@ use std::{
     path::{Path, PathBuf},
 };
 use tracing::trace;
+
+use crate::parser::{parse_class, parse_prog_if, parse_subclass};
 
 const DB_PATHS: &[&str] = &["/usr/share/hwdata/pci.ids", "/usr/share/misc/pci.ids"];
 #[cfg(feature = "online")]
@@ -18,25 +26,35 @@ pub enum VendorDataError {
     MissingIdsFile,
 }
 
-#[derive(Default, Clone, Debug)]
-pub struct DeviceInfo<'a> {
-    pub vendor_name: Option<&'a str>,
-    pub device_name: Option<&'a str>,
-    pub subvendor_name: Option<&'a str>,
-    pub subdevice_name: Option<&'a str>,
-}
-
 #[derive(Debug)]
 pub struct Database {
     pub vendors: HashMap<String, Vendor>,
+    pub classes: HashMap<String, Class>,
 }
 
 impl Database {
+    /// Attempt to read the database from a list of known file paths
+    ///
+    /// # Errors
+    /// Returns an error when either no file could be found or the parsing fails.
     pub fn read() -> Result<Self, Error> {
         let file = Self::open_file()?;
         Self::parse_db(file)
     }
 
+    /// Read the database from a given path
+    ///
+    /// # Errors
+    /// Returns an error when the file can't be read or when parsing fails
+    pub fn read_from_file<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        let file = File::open(path)?;
+        Self::parse_db(file)
+    }
+
+    /// Fetch a database from an online source
+    ///
+    /// # Errors
+    /// Returns an error when the database either can't be fetched or parsed
     #[cfg(feature = "online")]
     pub fn get_online() -> Result<Self, Error> {
         let response = ureq::get(URL).call()?;
@@ -44,56 +62,47 @@ impl Database {
         Self::parse_db(response.into_reader())
     }
 
+    /// Parse a database from the given reader
+    ///
+    /// # Errors
+    /// Returns an error whenever there's a parsing error
     pub fn parse_db<R: Read>(reader: R) -> Result<Self, Error> {
         let mut reader = BufReader::new(reader);
+        let mut buf = String::new();
+
+        let mut current_vendor: Option<(String, Vendor)> = None;
+        let mut current_device: Option<(String, Device)> = None;
+
+        let mut current_class: Option<(String, Class)> = None;
+        let mut current_subclass: Option<(String, SubClass)> = None;
 
         let mut vendors: HashMap<String, Vendor> = HashMap::with_capacity(2500);
 
-        let mut current_vendor: Option<Vendor> = None;
-        let mut current_vendor_id: Option<String> = None;
-
-        let mut current_device: Option<Device> = None;
-        let mut current_device_id: Option<String> = None;
-
-        let mut buf = String::new();
-
         while reader.read_line(&mut buf)? != 0 {
-            if buf.starts_with("C ") | buf.starts_with("c ") {
-                // Device classes, they're at the end of file and not yet supported
+            if buf.starts_with("C ") || buf.starts_with("c ") {
+                // Proceed to parse classes
+                current_class = Some(parse_class(&mut buf)?);
                 break;
-            } else if !(buf.starts_with('#') | buf.is_empty() | (buf == "\n")) {
+            } else if !(buf.starts_with('#') || buf.is_empty() || (buf == "\n")) {
                 // Subdevice
                 if buf.starts_with("\t\t") {
-                    let current_device = current_device
+                    let (_, current_device) = current_device
                         .as_mut()
                         .ok_or_else(Error::no_current_device)?;
 
-                    let (mut sub, name) = drain_id_and_name(&mut buf)?;
-
-                    let sub_offset = sub.find(' ').unwrap_or(sub.len());
-                    let start = get_actual_buf_start(&sub);
-                    let subvendor = sub.drain(start..sub_offset).collect();
-                    let start = get_actual_buf_start(&sub);
-                    let subdevice = sub.drain(start..).collect();
-
-                    let subdevice_id = SubDeviceId {
-                        subvendor,
-                        subdevice,
-                    };
+                    let (name, subdevice_id) = parse_subdevice_id(&mut buf)?;
 
                     current_device.subdevices.insert(subdevice_id, name);
 
                 // Device
                 } else if buf.starts_with('\t') {
                     // Device section is over, write to vendor
-                    if let Some(device) = current_device {
-                        let current_vendor = current_vendor
+                    if let Some((device_id, device)) = current_device {
+                        let (_, current_vendor) = current_vendor
                             .as_mut()
                             .ok_or_else(Error::no_current_vendor)?;
 
-                        current_vendor
-                            .devices
-                            .insert(current_device_id.unwrap(), device);
+                        current_vendor.devices.insert(device_id, device);
                     }
 
                     let (id, name) = drain_id_and_name(&mut buf)?;
@@ -103,50 +112,87 @@ impl Database {
                         subdevices: HashMap::new(),
                     };
 
-                    current_device = Some(device);
-                    current_device_id = Some(id);
+                    current_device = Some((id, device));
                 // Vendor
                 } else {
                     // The vendor section is complete so it needs to be pushed to the main list
-                    if let Some(device) = current_device {
-                        let vendor = current_vendor
+                    if let Some((device_id, device)) = current_device {
+                        let (_, vendor) = current_vendor
                             .as_mut()
                             .ok_or_else(Error::no_current_vendor)?;
-                        vendor.devices.insert(current_device_id.unwrap(), device);
+                        vendor.devices.insert(device_id, device);
                     }
-                    if let Some(vendor) = current_vendor {
-                        vendors.insert(current_vendor_id.unwrap(), vendor);
+                    if let Some((vendor_id, vendor)) = current_vendor {
+                        vendors.insert(vendor_id, vendor);
                     }
 
-                    let (id, name) = drain_id_and_name(&mut buf)?;
+                    let (vendor_id, name) = drain_id_and_name(&mut buf)?;
 
                     let vendor = Vendor {
                         name,
                         devices: HashMap::new(),
                     };
-                    current_vendor = Some(vendor);
-                    current_vendor_id = Some(id);
+                    current_vendor = Some((vendor_id, vendor));
                     current_device = None;
-                    current_device_id = None;
                 }
                 debug_assert!(buf.trim().is_empty());
             }
             buf.clear();
         }
-        if let Some(device) = current_device {
-            let vendor = current_vendor
+        if let Some((device_id, device)) = current_device {
+            let (_, vendor) = current_vendor
                 .as_mut()
                 .ok_or_else(Error::no_current_vendor)?;
-            vendor.devices.insert(current_device_id.unwrap(), device);
+            vendor.devices.insert(device_id, device);
         }
-        if let Some(vendor) = current_vendor {
-            vendors.insert(current_vendor_id.unwrap(), vendor);
+        if let Some((vendor_id, vendor)) = current_vendor {
+            vendors.insert(vendor_id, vendor);
         }
+        buf.clear();
 
         vendors.shrink_to_fit();
-        trace!("db len: {}", vendors.len());
+        trace!("Parsed {} vendors", vendors.len());
 
-        Ok(Self { vendors })
+        let mut classes: HashMap<String, Class> = HashMap::with_capacity(200);
+
+        while reader.read_line(&mut buf)? != 0 {
+            if buf.starts_with("C ") || buf.starts_with("c ") {
+                if let Some((subclass_id, subclass)) = current_subclass {
+                    let (_, class) = current_class.as_mut().ok_or_else(Error::no_current_class)?;
+
+                    class.subclasses.insert(subclass_id, subclass);
+                }
+                if let Some((class_id, class)) = current_class {
+                    classes.insert(class_id, class);
+                }
+
+                current_class = Some(parse_class(&mut buf)?);
+                current_subclass = None;
+            } else if buf.starts_with("\t\t") {
+                // Prog-if
+                let (id, name) = parse_prog_if(&mut buf)?;
+                let (_, subclass) = current_subclass
+                    .as_mut()
+                    .ok_or_else(Error::no_current_subclass)?;
+
+                subclass.prog_ifs.insert(id, name);
+            } else if buf.starts_with('\t') {
+                // Subclass
+                // Flush previous subclass
+                if let Some((subclass_id, subclass)) = current_subclass {
+                    let (_, class) = current_class.as_mut().ok_or_else(Error::no_current_class)?;
+
+                    class.subclasses.insert(subclass_id, subclass);
+                }
+                current_subclass = Some(parse_subclass(&mut buf)?);
+            }
+            buf.clear();
+        }
+        classes.shrink_to_fit();
+
+        trace!("Parsed {} classes", classes.len());
+
+        Ok(Self { vendors, classes })
     }
 
     fn open_file() -> Result<File, Error> {
@@ -160,6 +206,7 @@ impl Database {
         }
     }
 
+    #[must_use]
     pub fn get_device_info<'a>(
         &'a self,
         vendor_id: &str,
@@ -198,11 +245,11 @@ impl Database {
                 }
 
                 let subdevice_id = SubDeviceId {
-                    subvendor: subsys_vendor_id.to_owned(),
+                    subvendor: subsys_vendor_id.clone(),
                     subdevice: subsys_model_id,
                 };
 
-                subdevice_name = device.subdevices.get(&subdevice_id).map(|s| s.as_str());
+                subdevice_name = device.subdevices.get(&subdevice_id).map(String::as_str);
             }
         }
 
@@ -212,160 +259,5 @@ impl Database {
             subvendor_name,
             subdevice_name,
         }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Vendor {
-    pub name: String,
-    pub devices: HashMap<String, Device>,
-}
-
-impl Vendor {
-    pub fn new(name: String) -> Self {
-        Vendor {
-            name,
-            devices: HashMap::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Device {
-    pub name: String,
-    pub subdevices: HashMap<SubDeviceId, String>,
-}
-
-impl Device {
-    pub fn new(name: String) -> Self {
-        Device {
-            name,
-            subdevices: HashMap::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SubDeviceId {
-    pub subvendor: String,
-    pub subdevice: String,
-}
-
-const SPLIT: &str = "  ";
-
-fn drain_id_and_name(buf: &mut String) -> Result<(String, String), Error> {
-    let start = get_actual_buf_start(buf);
-    let split_offset = buf.find(SPLIT).ok_or_else(|| {
-        Error::Parse(format!(
-            "missing delimiter between vendor id and name in line {buf}"
-        ))
-    })?;
-    let mut id: String = buf.drain(start..split_offset).collect();
-    id.make_ascii_lowercase();
-
-    let start = get_actual_buf_start(buf);
-    let end = buf.find('\n').unwrap_or(buf.len());
-    let name = buf.drain(start..end).collect();
-
-    Ok((id, name))
-}
-
-fn get_actual_buf_start(buf: &str) -> usize {
-    let mut start = 0;
-    for (i, c) in buf.chars().enumerate() {
-        if !c.is_whitespace() {
-            start = i;
-            break;
-        }
-    }
-    start
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-    use tracing::Level;
-
-    #[test]
-    fn init() {
-        tracing_subscriber::fmt()
-            .with_max_level(Level::TRACE)
-            .init();
-    }
-
-    #[test]
-    fn parse_polaris_local() {
-        let db = Database::read().unwrap();
-        parse_polaris(db);
-    }
-
-    #[cfg(feature = "online")]
-    #[test]
-    fn parse_polaris_online() {
-        let db = Database::get_online().unwrap();
-        parse_polaris(db);
-    }
-
-    fn parse_polaris(db: Database) {
-        let data = db.get_device_info("1002", "67DF", "1DA2", "E387");
-
-        assert_eq!(
-            data.vendor_name,
-            Some("Advanced Micro Devices, Inc. [AMD/ATI]"),
-        );
-        assert_eq!(
-            data.device_name,
-            Some("Ellesmere [Radeon RX 470/480/570/570X/580/580X/590]"),
-        );
-        assert_eq!(data.subvendor_name, Some("Sapphire Technology Limited"));
-        // Depending on the pci.ids version shipped this may be different
-        let card_model = data.subdevice_name.unwrap();
-        assert!(card_model == "Radeon RX 570 Pulse 4GB" || card_model == "Radeon RX 580 Pulse 4GB");
-    }
-
-    #[test]
-    fn parse_vega() {
-        let db = Database::read().unwrap();
-        let data = db.get_device_info("1002", "687F", "1043", "0555");
-
-        assert_eq!(
-            data.vendor_name,
-            Some("Advanced Micro Devices, Inc. [AMD/ATI]")
-        );
-        assert_eq!(
-            data.device_name,
-            Some("Vega 10 XL/XT [Radeon RX Vega 56/64]")
-        );
-        assert_eq!(data.subvendor_name, Some("ASUSTeK Computer Inc."));
-        assert_eq!(data.subdevice_name, None);
-    }
-
-    #[test]
-    fn class_not_in_vendors() {
-        let db = Database::read().unwrap();
-
-        assert_eq!(db.vendors.get("c"), None);
-        assert_eq!(db.vendors.get("c 09"), None);
-    }
-
-    #[cfg(feature = "online")]
-    #[test]
-    fn parse_incomplete() {
-        let db = Database::get_online().unwrap();
-
-        let device_info = db.get_device_info("C 0c", "03", "fe", "");
-        trace!("{device_info:?}");
-        let expected_info = DeviceInfo {
-            vendor_name: Some("Serial bus controller"),
-            device_name: Some("USB controller"),
-            subvendor_name: None,
-            subdevice_name: Some("USB Device"),
-        };
-
-        assert_eq!(device_info.vendor_name, expected_info.vendor_name);
-        assert_eq!(device_info.device_name, expected_info.device_name);
-        assert_eq!(device_info.subvendor_name, expected_info.subvendor_name);
-        assert_eq!(device_info.subdevice_name, expected_info.subdevice_name);
     }
 }

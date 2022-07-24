@@ -28,4 +28,12 @@ impl Error {
     pub(crate) fn no_current_device() -> Error {
         Error::Parse("trying to add a subdevice without a device".to_owned())
     }
+
+    pub(crate) fn no_current_class() -> Error {
+        Error::Parse("trying to add a subclass without a class".to_owned())
+    }
+
+    pub(crate) fn no_current_subclass() -> Error {
+        Error::Parse("trying to add a programming interface without a subclass".to_owned())
+    }
 }
