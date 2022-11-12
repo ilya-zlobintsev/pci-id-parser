@@ -8,13 +8,13 @@ pub struct DeviceInfo<'a> {
     pub subdevice_name: Option<&'a str>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Vendor {
     pub name: String,
     pub devices: HashMap<String, Device>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Device {
     pub name: String,
     pub subdevices: HashMap<SubDeviceId, String>,

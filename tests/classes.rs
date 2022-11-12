@@ -33,3 +33,18 @@ fn get_vga_controller_if_prog() {
 
     assert_eq!(prog_if_name, "VGA controller");
 }
+
+#[cfg(feature = "online")]
+#[test]
+fn get_usb_device_if_prog() {
+    let db = Database::get_online().unwrap();
+
+    let class = db.classes.get("0c").unwrap();
+    assert_eq!(class.name, "Serial bus controller");
+
+    let subclass = class.subclasses.get("03").unwrap();
+    assert_eq!(subclass.name, "USB controller");
+
+    let prog_if = subclass.prog_ifs.get("fe").unwrap();
+    assert_eq!(prog_if, "USB Device");
+}

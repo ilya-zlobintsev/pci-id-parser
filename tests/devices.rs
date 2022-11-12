@@ -55,24 +55,3 @@ fn class_not_in_vendors() {
     assert_eq!(db.vendors.get("c"), None);
     assert_eq!(db.vendors.get("c 09"), None);
 }
-
-#[cfg(feature = "online")]
-#[test]
-fn parse_incomplete() {
-    use pciid_parser::schema::DeviceInfo;
-
-    let db = Database::get_online().unwrap();
-
-    let device_info = db.get_device_info("C 0c", "03", "fe", "");
-    let expected_info = DeviceInfo {
-        vendor_name: Some("Serial bus controller"),
-        device_name: Some("USB controller"),
-        subvendor_name: None,
-        subdevice_name: Some("USB Device"),
-    };
-
-    assert_eq!(device_info.vendor_name, expected_info.vendor_name);
-    assert_eq!(device_info.device_name, expected_info.device_name);
-    assert_eq!(device_info.subvendor_name, expected_info.subvendor_name);
-    assert_eq!(device_info.subdevice_name, expected_info.subdevice_name);
-}

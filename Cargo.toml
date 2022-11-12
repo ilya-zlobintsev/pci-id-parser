@@ -1,8 +1,8 @@
 [package]
 name = "pciid-parser"
-version = "0.6.0"
+version = "0.6.1"
 authors = ["Ilya Zlobintsev <ilya.zl@protonmail.com>"]
-edition = "2018"
+edition = "2021"
 license = "MIT"
 repository = "https://github.com/ilyazzz/pci-id-parser"
 homepage = "https://github.com/ilyazzz/pci-id-parser"

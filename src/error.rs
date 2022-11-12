@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 #[derive(Debug)]
 pub enum Error {
     FileNotFound,
@@ -17,6 +19,30 @@ impl From<std::io::Error> for Error {
 impl From<ureq::Error> for Error {
     fn from(error: ureq::Error) -> Self {
         Self::Request(error)
+    }
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::FileNotFound => write!(f, "file not found"),
+            Error::Parse(err) => write!(f, "parsing error: {err}"),
+            Error::Io(err) => write!(f, "io error: {err}"),
+            #[cfg(feature = "online")]
+            Error::Request(err) => write!(f, "network request error: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::FileNotFound => None,
+            Error::Parse(_) => None,
+            Error::Io(err) => Some(err),
+            #[cfg(feature = "online")]
+            Error::Request(err) => Some(err),
+        }
     }
 }
 
