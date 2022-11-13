@@ -4,9 +4,12 @@ mod error;
 mod parser;
 pub mod schema;
 
+use crate::parser::{parse_class, parse_prog_if, parse_subclass};
 use error::Error;
 use parser::{drain_id_and_name, parse_subdevice_id};
 use schema::{Class, Device, DeviceInfo, SubClass, SubDeviceId, Vendor};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fs::File,
@@ -14,8 +17,6 @@ use std::{
     path::{Path, PathBuf},
 };
 use tracing::trace;
-
-use crate::parser::{parse_class, parse_prog_if, parse_subclass};
 
 const DB_PATHS: &[&str] = &["/usr/share/hwdata/pci.ids", "/usr/share/misc/pci.ids"];
 #[cfg(feature = "online")]
@@ -27,6 +28,7 @@ pub enum VendorDataError {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Database {
     pub vendors: HashMap<String, Vendor>,
     pub classes: HashMap<String, Class>,
