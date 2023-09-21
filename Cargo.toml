@@ -1,12 +1,13 @@
 [package]
 name = "pciid-parser"
-version = "0.6.2"
+version = "0.6.3"
 authors = ["Ilya Zlobintsev <ilya.zl@protonmail.com>"]
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ilyazzz/pci-id-parser"
 homepage = "https://github.com/ilyazzz/pci-id-parser"
 description = "A library for parsing PCI ID tables"
+keywords = ["pci", "parser", "pci-id"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
