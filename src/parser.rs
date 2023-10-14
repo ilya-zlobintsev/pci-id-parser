@@ -113,7 +113,7 @@ mod tests {
         let (id, class) = parse_class(&mut buf).unwrap();
 
         assert_eq!(id, "00");
-        assert_eq!(class.name, "Unclassified device")
+        assert_eq!(class.name, "Unclassified device");
     }
 
     #[test]

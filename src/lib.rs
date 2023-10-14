@@ -16,9 +16,14 @@ use std::{
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
 };
+#[cfg(feature = "tracing")]
 use tracing::trace;
 
-const DB_PATHS: &[&str] = &["/usr/share/hwdata/pci.ids", "/usr/share/misc/pci.ids"];
+const DB_PATHS: &[&str] = &[
+    "/usr/share/hwdata/pci.ids",
+    "/usr/share/misc/pci.ids",
+    "@hwdata@/share/hwdata/pci.ids",
+];
 #[cfg(feature = "online")]
 const URL: &str = "https://pci-ids.ucw.cz/v2.2/pci.ids";
 
@@ -153,6 +158,8 @@ impl Database {
         buf.clear();
 
         vendors.shrink_to_fit();
+
+        #[cfg(feature = "tracing")]
         trace!("Parsed {} vendors", vendors.len());
 
         let mut classes: HashMap<String, Class> = HashMap::with_capacity(200);
@@ -192,6 +199,7 @@ impl Database {
         }
         classes.shrink_to_fit();
 
+        #[cfg(feature = "tracing")]
         trace!("Parsed {} classes", classes.len());
 
         Ok(Self { vendors, classes })
@@ -226,22 +234,28 @@ impl Database {
         let mut subvendor_name = None;
         let mut subdevice_name = None;
 
+        #[cfg(feature = "tracing")]
         trace!("Searching vendor {}", vendor_id);
         if let Some(vendor) = self.vendors.get(&vendor_id) {
+            #[cfg(feature = "tracing")]
             trace!("Found vendor {}", vendor.name);
             vendor_name = Some(vendor.name.as_str());
 
+            #[cfg(feature = "tracing")]
             trace!("Searching device {}", model_id);
             if let Some(device) = vendor.devices.get(&model_id) {
+                #[cfg(feature = "tracing")]
                 trace!("Found device {}", device.name);
                 device_name = Some(device.name.as_str());
 
+                #[cfg(feature = "tracing")]
                 trace!(
                     "Searching subdevice {} {}",
                     subsys_vendor_id,
                     subsys_model_id
                 );
                 if let Some(subvendor) = self.vendors.get(&subsys_vendor_id) {
+                    #[cfg(feature = "tracing")]
                     trace!("Found subvendor {}", subvendor.name);
                     subvendor_name = Some(subvendor.name.as_str());
                 }

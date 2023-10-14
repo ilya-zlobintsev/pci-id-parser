@@ -6,7 +6,7 @@ pub enum Error {
     Parse(String),
     Io(std::io::Error),
     #[cfg(feature = "online")]
-    Request(ureq::Error),
+    Request(Box<ureq::Error>),
 }
 
 impl From<std::io::Error> for Error {
@@ -18,7 +18,7 @@ impl From<std::io::Error> for Error {
 #[cfg(feature = "online")]
 impl From<ureq::Error> for Error {
     fn from(error: ureq::Error) -> Self {
-        Self::Request(error)
+        Self::Request(Box::new(error))
     }
 }
 
