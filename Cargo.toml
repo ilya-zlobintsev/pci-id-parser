@@ -20,5 +20,13 @@ serde = { version = "1.0.147", features = ["derive"], optional = true }
 online = ["ureq"]
 
 [dev-dependencies]
+divan = "0.1.0"
 pretty_assertions = "1.2.1"
 tracing-subscriber = "0.3.11"
+
+[[bench]]
+name = "parse"
+harness = false
+
+[profile.bench]
+debug = true
