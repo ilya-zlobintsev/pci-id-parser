@@ -12,8 +12,3 @@ fn parse_embedded() -> Database {
     let cursor = Cursor::new(DB_DATA);
     Database::parse_db(cursor).unwrap()
 }
-
-#[divan::bench]
-fn parse_from_file() -> Database {
-    Database::read_from_file("./tests/pci.ids").unwrap()
-}
