@@ -1,138 +1,185 @@
-use std::collections::HashMap;
-
-use crate::{
-    error::Error,
-    schema::{Class, SubClass, SubDeviceId},
-};
-
-pub fn parse_subdevice_id(buf: &mut String) -> Result<(String, SubDeviceId), Error> {
-    let (mut sub, name) = drain_id_and_name(buf)?;
-
-    let sub_offset = sub.find(' ').unwrap_or(sub.len());
-    let start = get_actual_buf_start(&sub);
-    let subvendor = sub.drain(start..sub_offset).collect();
-    let start = get_actual_buf_start(&sub);
-    let subdevice = sub.drain(start..).collect();
-
-    Ok((
-        name,
-        SubDeviceId {
-            subvendor,
-            subdevice,
-        },
-    ))
-}
-
-pub fn parse_class(buf: &mut String) -> Result<(String, Class), Error> {
-    let mut drain = buf.drain(2..);
-
-    let mut id = String::new();
-    while let Some(c) = drain.next() {
-        if c.is_ascii_whitespace() {
-            // Skip second space
-            drain
-                .next()
-                .ok_or_else(|| Error::Parse("Unexpected end of class line".to_owned()))?;
-            break;
-        }
-
-        id.push(c);
-    }
-
-    let mut name = String::new();
-
-    for c in drain {
-        if c == '\n' {
-            break;
-        }
-        name.push(c);
-    }
-
-    let class = Class {
-        name,
-        subclasses: HashMap::new(),
-    };
-
-    Ok((id, class))
-}
-
-pub fn parse_subclass(buf: &mut String) -> Result<(String, SubClass), Error> {
-    let (id, name) = drain_id_and_name(buf)?;
-
-    let subclass = SubClass {
-        name,
-        prog_ifs: HashMap::new(),
-    };
-
-    Ok((id, subclass))
-}
-
-pub fn parse_prog_if(buf: &mut String) -> Result<(String, String), Error> {
-    drain_id_and_name(buf)
-}
+use crate::error::Error;
+use std::io::BufRead;
 
 const SPLIT: &str = "  ";
 
-pub fn drain_id_and_name(buf: &mut String) -> Result<(String, String), Error> {
-    let start = get_actual_buf_start(buf);
-    let split_offset = buf.find(SPLIT).ok_or_else(|| {
-        Error::Parse(format!(
-            "missing delimiter between vendor id and name in line {buf}"
-        ))
-    })?;
-    let mut id: String = buf.drain(start..split_offset).collect();
-    id.make_ascii_lowercase();
-
-    let start = get_actual_buf_start(buf);
-    let end = buf.find('\n').unwrap_or(buf.len());
-    let name = buf.drain(start..end).collect();
-
-    Ok((id, name))
+#[derive(Debug, PartialEq, Eq)]
+pub enum Event<'a> {
+    Vendor {
+        id: &'a str,
+        name: &'a str,
+    },
+    Device {
+        id: &'a str,
+        name: &'a str,
+    },
+    Subdevice {
+        subvendor: &'a str,
+        subdevice: &'a str,
+        subsystem_name: &'a str,
+    },
+    Class {
+        id: &'a str,
+        name: &'a str,
+    },
+    SubClass {
+        id: &'a str,
+        name: &'a str,
+    },
+    ProgIf {
+        id: &'a str,
+        name: &'a str,
+    },
 }
 
-fn get_actual_buf_start(buf: &str) -> usize {
-    for (i, c) in buf.chars().enumerate() {
-        if !c.is_whitespace() {
-            return i;
+pub struct Parser<R> {
+    reader: R,
+    buf: String,
+    section: Section,
+}
+
+enum Section {
+    Devices,
+    Classes,
+}
+
+impl<R: BufRead> Parser<R> {
+    pub(crate) fn new(reader: R) -> Self {
+        Self {
+            reader,
+            buf: String::new(),
+            section: Section::Devices,
         }
     }
-    0
+
+    pub fn next_event(&mut self) -> Result<Option<Event>, Error> {
+        self.buf.clear();
+
+        while self.reader.read_line(&mut self.buf)? != 0 {
+            if self.buf.is_empty() || self.buf.starts_with('#') || self.buf == "\n" {
+                self.buf.clear();
+                continue;
+            }
+
+            let buf = &self.buf[..self.buf.len() - 1];
+
+            let event = if let Some(buf) = buf.strip_prefix("C ") {
+                self.section = Section::Classes;
+
+                let (id, name) = parse_split(buf)?;
+                Event::Class { id, name }
+            } else if let Some(buf) = buf.strip_prefix("\t\t") {
+                // Subdevice
+                let (prefix, name) = parse_split(buf)?;
+
+                if let Some((subvendor, subdevice)) = prefix.split_once(' ') {
+                    Event::Subdevice {
+                        subvendor,
+                        subdevice,
+                        subsystem_name: name,
+                    }
+                } else {
+                    Event::ProgIf { id: prefix, name }
+                }
+            } else if let Some(buf) = buf.strip_prefix('\t') {
+                let (id, name) = parse_split(buf)?;
+
+                match self.section {
+                    Section::Devices => Event::Device { id, name },
+                    Section::Classes => Event::SubClass { id, name },
+                }
+            } else {
+                let (id, name) = parse_split(buf)?;
+                Event::Vendor { id, name }
+            };
+            return Ok(Some(event));
+        }
+
+        Ok(None)
+    }
+}
+
+fn parse_split(buf: &str) -> Result<(&str, &str), Error> {
+    buf.split_once(SPLIT)
+        .ok_or_else(|| Error::Parse(format!("missing delimiter in line {buf}")))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::parser::parse_prog_if;
-
-    use super::{parse_class, parse_subclass};
+    use super::Parser;
+    use crate::parser::{Event, Section};
     use pretty_assertions::assert_eq;
+    use std::{
+        fs::File,
+        io::{BufReader, Cursor},
+    };
+
+    #[test]
+    fn first_events() {
+        let file = File::open("./tests/pci.ids").unwrap();
+        let mut parser = Parser::new(BufReader::new(file));
+
+        assert_eq!(
+            Event::Vendor {
+                id: "0001",
+                name: "SafeNet (wrong ID)"
+            },
+            parser.next_event().unwrap().unwrap()
+        );
+        assert_eq!(
+            Event::Vendor {
+                id: "0010",
+                name: "Allied Telesis, Inc (Wrong ID)"
+            },
+            parser.next_event().unwrap().unwrap()
+        );
+        assert_eq!(
+            Event::Device {
+                id: "8139",
+                name: "AT-2500TX V3 Ethernet"
+            },
+            parser.next_event().unwrap().unwrap()
+        );
+    }
 
     #[test]
     fn parse_class_line() {
-        let mut buf = "C 00  Unclassified device".to_owned();
-
-        let (id, class) = parse_class(&mut buf).unwrap();
-
-        assert_eq!(id, "00");
-        assert_eq!(class.name, "Unclassified device");
+        let mut parser = Parser::new(Cursor::new("C 00  Unclassified device\n"));
+        parser.section = Section::Classes;
+        assert_eq!(
+            Event::Class {
+                id: "00",
+                name: "Unclassified device"
+            },
+            parser.next_event().unwrap().unwrap()
+        );
     }
 
     #[test]
     fn parse_subclass_line() {
-        let mut buf = "	01  IDE interface".to_owned();
-
-        let (id, subclass) = parse_subclass(&mut buf).unwrap();
-
-        assert_eq!(id, "01");
-        assert_eq!(subclass.name, "IDE interface");
+        let buf = "	01  IDE interface\n";
+        let mut parser = Parser::new(Cursor::new(buf));
+        parser.section = Section::Classes;
+        assert_eq!(
+            Event::SubClass {
+                id: "01",
+                name: "IDE interface"
+            },
+            parser.next_event().unwrap().unwrap()
+        );
     }
 
     #[test]
     fn parse_prog_if_line() {
-        let mut buf = "		00  ISA Compatibility mode-only controller".to_owned();
-
-        let (id, name) = parse_prog_if(&mut buf).unwrap();
-
-        assert_eq!(id, "00");
-        assert_eq!(name, "ISA Compatibility mode-only controller");
+        let buf = "		00  ISA Compatibility mode-only controller\n";
+        let mut parser = Parser::new(Cursor::new(buf));
+        parser.section = Section::Classes;
+        assert_eq!(
+            Event::ProgIf {
+                id: "00",
+                name: "ISA Compatibility mode-only controller"
+            },
+            parser.next_event().unwrap().unwrap()
+        );
     }
 }
