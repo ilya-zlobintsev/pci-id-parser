@@ -17,11 +17,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const DB_PATHS: &[&str] = &[
-    "/usr/share/hwdata/pci.ids",
-    "/usr/share/misc/pci.ids",
-    "@hwdata@/share/hwdata/pci.ids",
-];
+const DB_PATHS: &[&str] = &["/usr/share/hwdata/pci.ids", "/usr/share/misc/pci.ids"];
+const CUSTOM_DB_PATH: Option<&str> = option_env!("PCI_ID_DB_PATH");
 #[cfg(feature = "online")]
 const URL: &str = "https://pci-ids.ucw.cz/v2.2/pci.ids";
 
@@ -205,7 +202,9 @@ impl Database {
     }
 
     fn open_file() -> Result<File, Error> {
-        if let Some(path) = DB_PATHS
+        if let Some(user_path) = CUSTOM_DB_PATH {
+            Ok(File::open(user_path)?)
+        } else if let Some(path) = DB_PATHS
             .iter()
             .find(|path| Path::exists(&PathBuf::from(path)))
         {
