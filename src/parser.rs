@@ -5,22 +5,22 @@ use std::io::BufRead;
 use wide::{i8x16, CmpEq};
 
 const VENDOR_NEEDLE: [u8; 16] = *b"\0\0\0\0  \0\0\0\0\0\0\0\0\0\0";
-const VENDOR_MASK: i32 = 0b00_0011 << 26;
+const VENDOR_MASK: i32 = (0b00_0011i32 << 26).reverse_bits();
 
 const DEVICE_NEEDLE: [u8; 16] = *b"\t\0\0\0\0  \0\0\0\0\0\0\0\0\0";
-const DEVICE_MASK: i32 = 0b100_0011 << 25;
+const DEVICE_MASK: i32 = (0b100_0011i32 << 25).reverse_bits();
 
 const SUBDEVICE_NEEDLE: [u8; 16] = *b"\t\t\0\0\0\0 \0\0\0\0  \0\0\0";
-const SUBDEVICE_MASK: i32 = 0b1_1000_0100_0011 << 19;
+const SUBDEVICE_MASK: i32 = (0b1_1000_0100_0011i32 << 19).reverse_bits();
 
 const CLASS_NEEDLE: [u8; 16] = *b"C \0\0  \0\0\0\0\0\0\0\0\0\0";
-const CLASS_MASK: i32 = 0b10011 << 26;
+const CLASS_MASK: i32 = (0b10011i32 << 26).reverse_bits();
 
 const SUBCLASS_NEEDLE: [u8; 16] = *b"\t\0\0  \0\0\0\0\0\0\0\0\0\0\0";
-const SUBCLASS_MASK: i32 = 0b1_00_11 << 27;
+const SUBCLASS_MASK: i32 = (0b1_00_11i32 << 27).reverse_bits();
 
 const PROG_IF_NEEDLE: [u8; 16] = *b"\t\t\0\0  \0\0\0\0\0\0\0\0\0\0";
-const PROG_IF_MASK: i32 = 0b11_0011 << 26;
+const PROG_IF_MASK: i32 = (0b11_0011i32 << 26).reverse_bits();
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Event<'a> {
@@ -156,13 +156,11 @@ fn buf_to_vector(buf: &[u8]) -> i8x16 {
     i8x16::new(unsafe { std::mem::transmute(data) })
 }
 
+// #[inline(always)]
 fn matches_pattern(vector: i8x16, needle: [u8; 16], expected_mask: i32) -> bool {
     let needle = unsafe { std::mem::transmute(needle) };
     let needle_vector = i8x16::new(needle);
-    // println!("Needle: {needle_vector:?}, expected mask {expected_mask:#032b}");
-    // Assume little-endian
-    // println!("Resulting mask: {resulting_mask:#032b}");
-    vector.cmp_eq(needle_vector).move_mask().reverse_bits() & expected_mask == expected_mask
+    vector.cmp_eq(needle_vector).move_mask() & expected_mask == expected_mask
 }
 
 #[inline(always)]
