@@ -5,6 +5,7 @@ mod parser;
 pub mod schema;
 
 use crate::parser::Parser;
+use ahash::{HashMapExt, RandomState};
 use error::Error;
 use parser::Event;
 use schema::{Class, Device, DeviceInfo, SubClass, SubDeviceId, Vendor};
@@ -33,8 +34,8 @@ pub enum VendorDataError {
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Database {
-    pub vendors: HashMap<String, Vendor>,
-    pub classes: HashMap<String, Class>,
+    pub vendors: HashMap<String, Vendor, RandomState>,
+    pub classes: HashMap<String, Class, RandomState>,
 }
 
 impl Database {
@@ -82,8 +83,10 @@ impl Database {
         let mut current_class: Option<(String, Class)> = None;
         let mut current_subclass: Option<(String, SubClass)> = None;
 
-        let mut vendors: HashMap<String, Vendor> = HashMap::with_capacity(2500);
-        let mut classes: HashMap<String, Class> = HashMap::with_capacity(200);
+        let mut vendors: HashMap<String, Vendor, RandomState> =
+            HashMap::<_, _, RandomState>::with_capacity(2500);
+        let mut classes: HashMap<String, Class, RandomState> =
+            HashMap::<_, _, RandomState>::with_capacity(200);
 
         while let Some(event) = parser.next_event()? {
             match event {
@@ -101,7 +104,7 @@ impl Database {
 
                     let vendor = Vendor {
                         name: name.to_owned(),
-                        devices: HashMap::new(),
+                        devices: HashMap::default(),
                     };
                     current_vendor = Some((id.to_owned(), vendor));
                 }
@@ -117,7 +120,7 @@ impl Database {
 
                     let device = Device {
                         name: name.to_owned(),
-                        subdevices: HashMap::new(),
+                        subdevices: HashMap::default(),
                     };
                     current_device = Some((id.to_owned(), device));
                 }
@@ -151,7 +154,7 @@ impl Database {
 
                     let class = Class {
                         name: name.to_owned(),
-                        subclasses: HashMap::new(),
+                        subclasses: HashMap::default(),
                     };
                     current_class = Some((id.to_owned(), class));
                 }
@@ -165,7 +168,7 @@ impl Database {
 
                     let subclass = SubClass {
                         name: name.to_owned(),
-                        prog_ifs: HashMap::new(),
+                        prog_ifs: HashMap::default(),
                     };
                     current_subclass = Some((id.to_owned(), subclass));
                 }

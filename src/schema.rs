@@ -1,3 +1,4 @@
+use ahash::RandomState;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, hash::Hash};
@@ -15,14 +16,14 @@ pub struct DeviceInfo<'a> {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Vendor {
     pub name: String,
-    pub devices: HashMap<String, Device>,
+    pub devices: HashMap<String, Device, RandomState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Device {
     pub name: String,
-    pub subdevices: HashMap<SubDeviceId, String>,
+    pub subdevices: HashMap<SubDeviceId, String, RandomState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -36,12 +37,12 @@ pub struct SubDeviceId {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Class {
     pub name: String,
-    pub subclasses: HashMap<String, SubClass>,
+    pub subclasses: HashMap<String, SubClass, RandomState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SubClass {
     pub name: String,
-    pub prog_ifs: HashMap<String, String>,
+    pub prog_ifs: HashMap<String, String, RandomState>,
 }
