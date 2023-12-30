@@ -2,8 +2,25 @@
 use crate::error::Error;
 use atoi::FromRadix16;
 use std::io::BufRead;
+use wide::{i8x16, CmpEq};
 
-const SPLIT: &[u8] = b"  ";
+const VENDOR_NEEDLE: [u8; 16] = *b"\0\0\0\0  \0\0\0\0\0\0\0\0\0\0";
+const VENDOR_MASK: i32 = 0b00_0011 << 26;
+
+const DEVICE_NEEDLE: [u8; 16] = *b"\t\0\0\0\0  \0\0\0\0\0\0\0\0\0";
+const DEVICE_MASK: i32 = 0b100_0011 << 25;
+
+const SUBDEVICE_NEEDLE: [u8; 16] = *b"\t\t\0\0\0\0 \0\0\0\0  \0\0\0";
+const SUBDEVICE_MASK: i32 = 0b1_1000_0100_0011 << 19;
+
+const CLASS_NEEDLE: [u8; 16] = *b"C \0\0  \0\0\0\0\0\0\0\0\0\0";
+const CLASS_MASK: i32 = 0b10011 << 26;
+
+const SUBCLASS_NEEDLE: [u8; 16] = *b"\t\0\0  \0\0\0\0\0\0\0\0\0\0\0";
+const SUBCLASS_MASK: i32 = 0b1_00_11 << 27;
+
+const PROG_IF_NEEDLE: [u8; 16] = *b"\t\t\0\0  \0\0\0\0\0\0\0\0\0\0";
+const PROG_IF_MASK: i32 = 0b11_0011 << 26;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Event<'a> {
@@ -64,41 +81,62 @@ impl<R: BufRead> Parser<R> {
             }
 
             let buf = &self.buf[..self.buf.len() - 1];
+            let vector = buf_to_vector(buf);
 
-            let event = if let Some(buf) = buf.strip_prefix(b"C ") {
-                self.section = Section::Classes;
+            let event = match self.section {
+                Section::Devices => {
+                    if matches_pattern(vector, CLASS_NEEDLE, CLASS_MASK) {
+                        self.section = Section::Classes;
 
-                let (id, name) = parse_split(buf)?;
-                let id = parse_id(id)?;
-                Event::Class { id, name }
-            } else if let Some(buf) = buf.strip_prefix(b"\t\t") {
-                // Subdevice
-                let (prefix, name) = parse_split(buf)?;
-
-                if let Some((subvendor, subdevice)) = split_slice_once(prefix, b" ") {
-                    let subvendor = parse_id(subvendor)?;
-                    let subdevice = parse_id(subdevice)?;
-                    Event::Subdevice {
-                        subvendor,
-                        subdevice,
-                        subsystem_name: name,
+                        let id = parse_id(&buf[2..4])?;
+                        let name = std::str::from_utf8(&buf[6..])?;
+                        Event::Class { id, name }
+                    } else if matches_pattern(vector, DEVICE_NEEDLE, DEVICE_MASK) {
+                        let id = parse_id(&buf[1..5])?;
+                        let name = std::str::from_utf8(&buf[7..])?;
+                        Event::Device { id, name }
+                    } else if matches_pattern(vector, VENDOR_NEEDLE, VENDOR_MASK) {
+                        let id = parse_id(&buf[0..4])?;
+                        let name = std::str::from_utf8(&buf[6..])?;
+                        Event::Vendor { id, name }
+                    } else if matches_pattern(vector, SUBDEVICE_NEEDLE, SUBDEVICE_MASK) {
+                        let subvendor = parse_id(&buf[2..6])?;
+                        let subdevice = parse_id(&buf[7..11])?;
+                        let subsystem_name = std::str::from_utf8(&buf[13..])?;
+                        Event::Subdevice {
+                            subvendor,
+                            subdevice,
+                            subsystem_name,
+                        }
+                    } else {
+                        return Err(Error::Parse(format!(
+                            "Could not match device section line \"{}\"",
+                            String::from_utf8(buf.to_vec())
+                                .unwrap_or_else(|_| "Invalid UTF-8".to_owned())
+                        )));
                     }
-                } else {
-                    let id = parse_id(prefix)?;
-                    Event::ProgIf { id, name }
                 }
-            } else if let Some(buf) = buf.strip_prefix(b"\t") {
-                let (id, name) = parse_split(buf)?;
-                let id = parse_id(id)?;
-
-                match self.section {
-                    Section::Devices => Event::Device { id, name },
-                    Section::Classes => Event::SubClass { id, name },
+                Section::Classes => {
+                    if matches_pattern(vector, CLASS_NEEDLE, CLASS_MASK) {
+                        let id = parse_id(&buf[2..4])?;
+                        let name = std::str::from_utf8(&buf[6..])?;
+                        Event::Class { id, name }
+                    } else if matches_pattern(vector, SUBCLASS_NEEDLE, SUBCLASS_MASK) {
+                        let id = parse_id(&buf[1..3])?;
+                        let name = std::str::from_utf8(&buf[5..])?;
+                        Event::SubClass { id, name }
+                    } else if matches_pattern(vector, PROG_IF_NEEDLE, PROG_IF_MASK) {
+                        let id = parse_id(&buf[2..4])?;
+                        let name = std::str::from_utf8(&buf[6..])?;
+                        Event::ProgIf { id, name }
+                    } else {
+                        return Err(Error::Parse(format!(
+                            "Could not match class section line \"{}\"",
+                            String::from_utf8(buf.to_vec())
+                                .unwrap_or_else(|_| "Invalid UTF-8".to_owned())
+                        )));
+                    }
                 }
-            } else {
-                let (id, name) = parse_split(buf)?;
-                let id = parse_id(id)?;
-                Event::Vendor { id, name }
             };
             return Ok(Some(event));
         }
@@ -107,28 +145,29 @@ impl<R: BufRead> Parser<R> {
     }
 }
 
-fn parse_split(buf: &[u8]) -> Result<(&[u8], &str), Error> {
-    let (id, raw_name) = split_slice_once(buf, SPLIT).ok_or_else(|| {
-        Error::Parse(format!(
-            "missing delimiter in line {:?}",
-            String::from_utf8(buf.to_vec())
-        ))
-    })?;
+fn buf_to_vector(buf: &[u8]) -> i8x16 {
+    let mut data = [0u8; 16];
+    if buf.len() >= 16 {
+        data.copy_from_slice(&buf[0..16]);
+    } else {
+        data[0..buf.len()].copy_from_slice(buf);
+    }
 
-    let name = std::str::from_utf8(raw_name)?;
-    Ok((id, name))
+    i8x16::new(unsafe { std::mem::transmute(data) })
+}
+
+fn matches_pattern(vector: i8x16, needle: [u8; 16], expected_mask: i32) -> bool {
+    let needle = unsafe { std::mem::transmute(needle) };
+    let needle_vector = i8x16::new(needle);
+    // println!("Needle: {needle_vector:?}, expected mask {expected_mask:#032b}");
+    // Assume little-endian
+    // println!("Resulting mask: {resulting_mask:#032b}");
+    vector.cmp_eq(needle_vector).move_mask().reverse_bits() & expected_mask == expected_mask
 }
 
 #[inline(always)]
-fn split_slice_once<'a>(buf: &'a [u8], separator: &[u8]) -> Option<(&'a [u8], &'a [u8])> {
-    buf.windows(separator.len())
-        .position(|window| window == separator)
-        .map(|split_index| (&buf[0..split_index], &buf[split_index + separator.len()..]))
-}
-
-#[inline(always)]
-fn parse_id(value: &[u8]) -> Result<u16, Error> {
-    let (id, offset) = u16::from_radix_16(value);
+fn parse_id<T: FromRadix16>(value: &[u8]) -> Result<T, Error> {
+    let (id, offset) = T::from_radix_16(value);
     if offset == 0 {
         Err(Error::Parse(format!(
             "Could not parse integer from {:?}",
@@ -179,7 +218,6 @@ mod tests {
     #[test]
     fn parse_class_line() {
         let mut parser = Parser::new(Cursor::new("C 00  Unclassified device\n"));
-        parser.section = Section::Classes;
         assert_eq!(
             Event::Class {
                 id: 0x00,
@@ -198,6 +236,19 @@ mod tests {
             Event::SubClass {
                 id: 0x01,
                 name: "IDE interface"
+            },
+            parser.next_event().unwrap().unwrap()
+        );
+    }
+    #[test]
+    fn parse_subclass_line2() {
+        let buf = "\t00  Non-VGA unclassified device\n";
+        let mut parser = Parser::new(Cursor::new(buf));
+        parser.section = Section::Classes;
+        assert_eq!(
+            Event::SubClass {
+                id: 0x00,
+                name: "Non-VGA unclassified device"
             },
             parser.next_event().unwrap().unwrap()
         );

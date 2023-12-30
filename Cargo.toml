@@ -16,6 +16,7 @@ ureq = { version = "2.4", optional = true }
 serde = { version = "1.0.147", features = ["derive"], optional = true }
 ahash = "0.8.7"
 atoi = "2.0.0"
+wide = "0.7.13"
 
 [features]
 online = ["ureq"]
