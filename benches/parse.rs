@@ -7,7 +7,7 @@ fn main() {
     divan::main();
 }
 
-#[divan::bench]
+#[divan::bench(sample_count = 500)]
 fn parse_embedded() -> Database {
     let cursor = Cursor::new(DB_DATA);
     Database::parse_db(cursor).unwrap()
