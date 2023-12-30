@@ -247,7 +247,7 @@ impl Database {
                 }
 
                 let subdevice_id = SubDeviceId {
-                    subvendor: subsys_vendor_id.clone(),
+                    subvendor: subsys_vendor_id,
                     subdevice: subsys_model_id,
                 };
 

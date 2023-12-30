@@ -1,3 +1,4 @@
+#![allow(clippy::inline_always)]
 use crate::error::Error;
 use atoi::FromRadix16;
 use std::io::BufRead;
@@ -118,12 +119,14 @@ fn parse_split(buf: &[u8]) -> Result<(&[u8], &str), Error> {
     Ok((id, name))
 }
 
+#[inline(always)]
 fn split_slice_once<'a>(buf: &'a [u8], separator: &[u8]) -> Option<(&'a [u8], &'a [u8])> {
     buf.windows(separator.len())
         .position(|window| window == separator)
         .map(|split_index| (&buf[0..split_index], &buf[split_index + separator.len()..]))
 }
 
+#[inline(always)]
 fn parse_id(value: &[u8]) -> Result<u16, Error> {
     let (id, offset) = u16::from_radix_16(value);
     if offset == 0 {
