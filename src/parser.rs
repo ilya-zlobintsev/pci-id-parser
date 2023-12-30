@@ -1,7 +1,7 @@
 use crate::error::Error;
 use std::io::BufRead;
 
-const SPLIT: &str = "  ";
+const SPLIT: &[u8] = b"  ";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Event<'a> {
@@ -34,7 +34,7 @@ pub enum Event<'a> {
 
 pub struct Parser<R> {
     reader: R,
-    buf: String,
+    buf: Vec<u8>,
     section: Section,
 }
 
@@ -47,7 +47,7 @@ impl<R: BufRead> Parser<R> {
     pub(crate) fn new(reader: R) -> Self {
         Self {
             reader,
-            buf: String::new(),
+            buf: Vec::new(),
             section: Section::Devices,
         }
     }
@@ -55,20 +55,20 @@ impl<R: BufRead> Parser<R> {
     pub fn next_event(&mut self) -> Result<Option<Event>, Error> {
         self.buf.clear();
 
-        while self.reader.read_line(&mut self.buf)? != 0 {
-            if self.buf.is_empty() || self.buf.starts_with('#') || self.buf == "\n" {
+        while self.reader.read_until(b'\n', &mut self.buf)? != 0 {
+            if self.buf.is_empty() || self.buf.starts_with(b"#") || self.buf == b"\n" {
                 self.buf.clear();
                 continue;
             }
 
             let buf = &self.buf[..self.buf.len() - 1];
 
-            let event = if let Some(buf) = buf.strip_prefix("C ") {
+            let event = if let Some(buf) = buf.strip_prefix(b"C ") {
                 self.section = Section::Classes;
 
                 let (id, name) = parse_split(buf)?;
                 Event::Class { id, name }
-            } else if let Some(buf) = buf.strip_prefix("\t\t") {
+            } else if let Some(buf) = buf.strip_prefix(b"\t\t") {
                 // Subdevice
                 let (prefix, name) = parse_split(buf)?;
 
@@ -81,7 +81,7 @@ impl<R: BufRead> Parser<R> {
                 } else {
                     Event::ProgIf { id: prefix, name }
                 }
-            } else if let Some(buf) = buf.strip_prefix('\t') {
+            } else if let Some(buf) = buf.strip_prefix(b"\t") {
                 let (id, name) = parse_split(buf)?;
 
                 match self.section {
@@ -99,9 +99,20 @@ impl<R: BufRead> Parser<R> {
     }
 }
 
-fn parse_split(buf: &str) -> Result<(&str, &str), Error> {
-    buf.split_once(SPLIT)
-        .ok_or_else(|| Error::Parse(format!("missing delimiter in line {buf}")))
+fn parse_split(buf: &[u8]) -> Result<(&str, &str), Error> {
+    let split_index = buf
+        .windows(SPLIT.len())
+        .position(|window| window == SPLIT)
+        .ok_or_else(|| {
+            Error::Parse(format!(
+                "missing delimiter in line {:?}",
+                String::from_utf8(buf.to_vec())
+            ))
+        })?;
+
+    let id = std::str::from_utf8(&buf[0..split_index])?;
+    let name = std::str::from_utf8(&buf[split_index + SPLIT.len()..])?;
+    Ok((id, name))
 }
 
 #[cfg(test)]

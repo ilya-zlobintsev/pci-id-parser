@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, str::Utf8Error};
 
 #[derive(Debug)]
 pub enum Error {
@@ -7,6 +7,7 @@ pub enum Error {
     Io(std::io::Error),
     #[cfg(feature = "online")]
     Request(Box<ureq::Error>),
+    Utf8Error(Utf8Error),
 }
 
 impl From<std::io::Error> for Error {
@@ -30,6 +31,7 @@ impl Display for Error {
             Error::Io(err) => write!(f, "io error: {err}"),
             #[cfg(feature = "online")]
             Error::Request(err) => write!(f, "network request error: {err}"),
+            Error::Utf8Error(err) => write!(f, "UTF-8 error: {err}"),
         }
     }
 }
@@ -42,7 +44,14 @@ impl std::error::Error for Error {
             Error::Io(err) => Some(err),
             #[cfg(feature = "online")]
             Error::Request(err) => Some(err),
+            Error::Utf8Error(err) => Some(err),
         }
+    }
+}
+
+impl From<Utf8Error> for Error {
+    fn from(err: Utf8Error) -> Self {
+        Self::Utf8Error(err)
     }
 }
 
