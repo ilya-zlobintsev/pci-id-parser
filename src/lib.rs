@@ -34,8 +34,8 @@ pub enum VendorDataError {
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Database {
-    pub vendors: HashMap<String, Vendor, RandomState>,
-    pub classes: HashMap<String, Class, RandomState>,
+    pub vendors: HashMap<u16, Vendor, RandomState>,
+    pub classes: HashMap<u16, Class, RandomState>,
 }
 
 impl Database {
@@ -77,15 +77,15 @@ impl Database {
         let reader = BufReader::new(reader);
         let mut parser = Parser::new(reader);
 
-        let mut current_vendor: Option<(String, Vendor)> = None;
-        let mut current_device: Option<(String, Device)> = None;
+        let mut current_vendor: Option<(u16, Vendor)> = None;
+        let mut current_device: Option<(u16, Device)> = None;
 
-        let mut current_class: Option<(String, Class)> = None;
-        let mut current_subclass: Option<(String, SubClass)> = None;
+        let mut current_class: Option<(u16, Class)> = None;
+        let mut current_subclass: Option<(u16, SubClass)> = None;
 
-        let mut vendors: HashMap<String, Vendor, RandomState> =
+        let mut vendors: HashMap<u16, Vendor, RandomState> =
             HashMap::<_, _, RandomState>::with_capacity(2500);
-        let mut classes: HashMap<String, Class, RandomState> =
+        let mut classes: HashMap<u16, Class, RandomState> =
             HashMap::<_, _, RandomState>::with_capacity(200);
 
         while let Some(event) = parser.next_event()? {
@@ -106,7 +106,7 @@ impl Database {
                         name: name.to_owned(),
                         devices: HashMap::default(),
                     };
-                    current_vendor = Some((id.to_owned(), vendor));
+                    current_vendor = Some((id, vendor));
                 }
                 Event::Device { id, name } => {
                     // Device section is over, write to vendor
@@ -122,7 +122,7 @@ impl Database {
                         name: name.to_owned(),
                         subdevices: HashMap::default(),
                     };
-                    current_device = Some((id.to_owned(), device));
+                    current_device = Some((id, device));
                 }
                 Event::Subdevice {
                     subvendor,
@@ -134,8 +134,8 @@ impl Database {
                         .ok_or_else(Error::no_current_device)?;
 
                     let subdevice_id = SubDeviceId {
-                        subvendor: subvendor.to_owned(),
-                        subdevice: subdevice.to_owned(),
+                        subvendor,
+                        subdevice,
                     };
                     current_device
                         .subdevices
@@ -156,7 +156,7 @@ impl Database {
                         name: name.to_owned(),
                         subclasses: HashMap::default(),
                     };
-                    current_class = Some((id.to_owned(), class));
+                    current_class = Some((id, class));
                 }
                 Event::SubClass { id, name } => {
                     if let Some((subclass_id, subclass)) = current_subclass {
@@ -170,7 +170,7 @@ impl Database {
                         name: name.to_owned(),
                         prog_ifs: HashMap::default(),
                     };
-                    current_subclass = Some((id.to_owned(), subclass));
+                    current_subclass = Some((id, subclass));
                 }
                 Event::ProgIf { id, name } => {
                     let (_, subclass) = current_subclass
@@ -226,10 +226,10 @@ impl Database {
         subsys_vendor_id: &str,
         subsys_model_id: &str,
     ) -> DeviceInfo<'a> {
-        let vendor_id = vendor_id.to_lowercase();
-        let model_id = model_id.to_lowercase();
-        let subsys_vendor_id = subsys_vendor_id.to_lowercase();
-        let subsys_model_id = subsys_model_id.to_lowercase();
+        let vendor_id = u16::from_str_radix(vendor_id, 16).unwrap_or_default();
+        let model_id = u16::from_str_radix(model_id, 16).unwrap_or_default();
+        let subsys_vendor_id = u16::from_str_radix(subsys_vendor_id, 16).unwrap_or_default();
+        let subsys_model_id = u16::from_str_radix(subsys_model_id, 16).unwrap_or_default();
 
         let mut vendor_name = None;
         let mut device_name = None;

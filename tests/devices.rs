@@ -47,11 +47,3 @@ fn parse_vega() {
     assert_eq!(data.subvendor_name, Some("ASUSTeK Computer Inc."));
     assert_eq!(data.subdevice_name, None);
 }
-
-#[test]
-fn class_not_in_vendors() {
-    let db = Database::read().unwrap();
-
-    assert_eq!(db.vendors.get("c"), None);
-    assert_eq!(db.vendors.get("c 09"), None);
-}

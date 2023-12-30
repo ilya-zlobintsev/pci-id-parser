@@ -1,4 +1,4 @@
-use std::{fmt::Display, str::Utf8Error};
+use std::{fmt::Display, num::ParseIntError, str::Utf8Error};
 
 #[derive(Debug)]
 pub enum Error {
@@ -52,6 +52,12 @@ impl std::error::Error for Error {
 impl From<Utf8Error> for Error {
     fn from(err: Utf8Error) -> Self {
         Self::Utf8Error(err)
+    }
+}
+
+impl From<ParseIntError> for Error {
+    fn from(err: ParseIntError) -> Self {
+        Self::Parse(format!("Invalid integer: {err}"))
     }
 }
 
