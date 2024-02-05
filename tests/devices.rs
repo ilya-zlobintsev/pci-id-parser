@@ -55,3 +55,45 @@ fn class_not_in_vendors() {
     assert_eq!(db.vendors.get("c"), None);
     assert_eq!(db.vendors.get("c 09"), None);
 }
+
+#[test]
+fn find_amd() {
+    let name = pciid_parser::find_vendor_name(0x1002).unwrap().unwrap();
+    assert_eq!("Advanced Micro Devices, Inc. [AMD/ATI]", name);
+}
+
+#[test]
+fn find_polaris() {
+    let name = pciid_parser::find_device_name(0x1002, 0x67df)
+        .unwrap()
+        .unwrap();
+    assert_eq!("Ellesmere [Radeon RX 470/480/570/570X/580/580X/590]", name);
+}
+
+#[test]
+fn find_following_device() {
+    let name = pciid_parser::find_device_name(0x1002, 0x1304)
+        .unwrap()
+        .unwrap();
+    assert_eq!("Kaveri", name);
+}
+
+#[test]
+fn find_between_vendors() {
+    let name = pciid_parser::find_device_name(0x1001, 0x1306).unwrap();
+    assert_eq!(None, name);
+}
+
+#[test]
+fn find_between_vendors_2() {
+    let name = pciid_parser::find_device_name(0x0001, 0x8139).unwrap();
+    assert_eq!(None, name);
+}
+
+#[test]
+fn find_subdevice() {
+    let name = pciid_parser::find_subdevice_name(0x1002, 0x67df, 0x1da2, 0xe387)
+        .unwrap()
+        .unwrap();
+    assert_eq!("Radeon RX 580 Pulse 4GB", name);
+}

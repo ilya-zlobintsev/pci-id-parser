@@ -260,3 +260,165 @@ impl Database {
         }
     }
 }
+
+/// Try to find the name of a vendor by its id.
+/// This will search the database from one of the known file paths for the name.
+///
+/// # Errors
+/// Returns an error when the file can't be read or when parsing fails
+pub fn find_vendor_name(vendor_id: u16) -> Result<Option<String>, Error> {
+    let reader = Database::open_file()?;
+    find_vendor_name_with_reader(reader, vendor_id)
+}
+
+/// Try to find the name of a vendor by its id.
+/// This will search the database from the given reader for the name.
+///
+/// # Errors
+/// Returns an error when parsing fails
+pub fn find_vendor_name_with_reader<R: Read>(
+    reader: R,
+    vendor_id: u16,
+) -> Result<Option<String>, Error> {
+    let vendor_id = format!("{vendor_id:x?}");
+
+    let mut parser = Parser::new(BufReader::new(reader));
+
+    while let Some(event) = parser.next_event()? {
+        if let Event::Vendor { id, name } = event {
+            if id == vendor_id {
+                return Ok(Some(name.to_owned()));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+/// Try to find the name of a device by its vendor and device id.
+/// This will search the database from one of the known file paths for the name.
+///
+/// # Errors
+/// Returns an error when the file can't be read or when parsing fails
+pub fn find_device_name(vendor_id: u16, device_id: u16) -> Result<Option<String>, Error> {
+    let reader = Database::open_file()?;
+    find_device_name_with_reader(reader, vendor_id, device_id)
+}
+
+/// Try to find the name of a device by its vendor and device id.
+/// This will search the database from the given reader for the name.
+///
+/// # Errors
+/// Returns an error when parsing fails
+pub fn find_device_name_with_reader<R: Read>(
+    reader: R,
+    vendor_id: u16,
+    device_id: u16,
+) -> Result<Option<String>, Error> {
+    let vendor_id = format!("{vendor_id:x?}");
+    let device_id = format!("{device_id:x?}");
+
+    let mut parser = Parser::new(BufReader::new(reader));
+
+    while let Some(event) = parser.next_event()? {
+        if let Event::Vendor { id, .. } = event {
+            if id == vendor_id {
+                while let Some(event) = parser.next_event()? {
+                    match event {
+                        Event::Device { id, name } => {
+                            if id == device_id {
+                                return Ok(Some(name.to_owned()));
+                            }
+                        }
+                        Event::Vendor { .. } => break,
+                        _ => (),
+                    }
+                }
+
+                break;
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+/// Try to find the name of a subdevice by its ids.
+/// This will search the database from the given reader for the name.
+///
+/// # Errors
+/// Returns an error when parsing fails
+pub fn find_subdevice_name(
+    parent_vendor_id: u16,
+    parent_device_id: u16,
+    subvendor_id: u16,
+    subdevice_id: u16,
+) -> Result<Option<String>, Error> {
+    let reader = Database::open_file()?;
+    find_subdevice_name_with_reader(
+        reader,
+        parent_vendor_id,
+        parent_device_id,
+        subvendor_id,
+        subdevice_id,
+    )
+}
+
+/// Try to find the name of a subdevice by its ids.
+/// This will search the database from the given reader for the name.
+///
+/// # Errors
+/// Returns an error when parsing fails
+pub fn find_subdevice_name_with_reader<R: Read>(
+    reader: R,
+    parent_vendor_id: u16,
+    parent_device_id: u16,
+    subvendor_id: u16,
+    subdevice_id: u16,
+) -> Result<Option<String>, Error> {
+    let parent_vendor_id = format!("{parent_vendor_id:x?}");
+    let parent_device_id = format!("{parent_device_id:x?}");
+    let subvendor_id = format!("{subvendor_id:x?}");
+    let subdevice_id = format!("{subdevice_id:x?}");
+
+    let mut parser = Parser::new(BufReader::new(reader));
+
+    while let Some(event) = parser.next_event()? {
+        if let Event::Vendor { id, .. } = event {
+            if id == parent_vendor_id {
+                while let Some(event) = parser.next_event()? {
+                    match event {
+                        Event::Device { id, .. } => {
+                            if id == parent_device_id {
+                                while let Some(event) = parser.next_event()? {
+                                    match event {
+                                        Event::Subdevice {
+                                            subvendor,
+                                            subdevice,
+                                            subsystem_name,
+                                        } => {
+                                            if subvendor == subvendor_id
+                                                && subdevice == subdevice_id
+                                            {
+                                                return Ok(Some(subsystem_name.to_owned()));
+                                            }
+                                        }
+                                        _ => break,
+                                    }
+                                }
+
+                                break;
+                            }
+                        }
+                        Event::Vendor { .. } => break,
+                        _ => (),
+                    }
+                }
+
+                break;
+            }
+        }
+    }
+
+    Ok(None)
+}
