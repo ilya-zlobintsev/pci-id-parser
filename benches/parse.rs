@@ -14,18 +14,18 @@ fn parse_embedded() -> Database {
 }
 
 #[divan::bench]
-fn find_polaris() -> Option<String> {
+fn find_polaris() -> Option<(String, String)> {
     let cursor = Cursor::new(DB_DATA);
     pciid_parser::find_device_name_with_reader(cursor, 0x1002, 0x67df).unwrap()
 }
 
 #[divan::bench]
-fn find_end() -> Option<String> {
+fn find_end() -> Option<(String, String)> {
     let cursor = Cursor::new(DB_DATA);
     pciid_parser::find_device_name_with_reader(cursor, 0x1fc9, 0x3010).unwrap()
 }
 
 #[divan::bench]
-fn find_end_in_file() -> Option<String> {
+fn find_end_in_file() -> Option<(String, String)> {
     pciid_parser::find_device_name(0x1fc9, 0x3010).unwrap()
 }

@@ -300,7 +300,7 @@ pub fn find_vendor_name_with_reader<R: Read>(
 ///
 /// # Errors
 /// Returns an error when the file can't be read or when parsing fails
-pub fn find_device_name(vendor_id: u16, device_id: u16) -> Result<Option<String>, Error> {
+pub fn find_device_name(vendor_id: u16, device_id: u16) -> Result<Option<(String, String)>, Error> {
     let reader = Database::open_file()?;
     find_device_name_with_reader(reader, vendor_id, device_id)
 }
@@ -314,20 +314,25 @@ pub fn find_device_name_with_reader<R: Read>(
     reader: R,
     vendor_id: u16,
     device_id: u16,
-) -> Result<Option<String>, Error> {
+) -> Result<Option<(String, String)>, Error> {
     let vendor_id = format!("{vendor_id:x?}");
     let device_id = format!("{device_id:x?}");
 
     let mut parser = Parser::new(BufReader::new(reader));
 
     while let Some(event) = parser.next_event()? {
-        if let Event::Vendor { id, .. } = event {
+        if let Event::Vendor {
+            id,
+            name: vendor_name,
+        } = event
+        {
+            let vendor_name = vendor_name.to_owned();
             if id == vendor_id {
                 while let Some(event) = parser.next_event()? {
                     match event {
                         Event::Device { id, name } => {
                             if id == device_id {
-                                return Ok(Some(name.to_owned()));
+                                return Ok(Some((vendor_name, name.to_owned())));
                             }
                         }
                         Event::Vendor { .. } => break,

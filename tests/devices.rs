@@ -64,18 +64,22 @@ fn find_amd() {
 
 #[test]
 fn find_polaris() {
-    let name = pciid_parser::find_device_name(0x1002, 0x67df)
+    let (vendor_name, device_name) = pciid_parser::find_device_name(0x1002, 0x67df)
         .unwrap()
         .unwrap();
-    assert_eq!("Ellesmere [Radeon RX 470/480/570/570X/580/580X/590]", name);
+    assert_eq!("Advanced Micro Devices, Inc. [AMD/ATI]", vendor_name);
+    assert_eq!(
+        "Ellesmere [Radeon RX 470/480/570/570X/580/580X/590]",
+        device_name
+    );
 }
 
 #[test]
 fn find_following_device() {
-    let name = pciid_parser::find_device_name(0x1002, 0x1304)
+    let (_, device_name) = pciid_parser::find_device_name(0x1002, 0x1304)
         .unwrap()
         .unwrap();
-    assert_eq!("Kaveri", name);
+    assert_eq!("Kaveri", device_name);
 }
 
 #[test]
