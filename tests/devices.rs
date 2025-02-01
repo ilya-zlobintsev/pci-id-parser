@@ -15,7 +15,7 @@ fn parse_polaris_online() {
 }
 
 fn parse_polaris(db: Database) {
-    let data = db.get_device_info("1002", "67DF", "1DA2", "E387");
+    let data = db.get_device_info(0x1002, 0x67df, 0x1DA2, 0xE387);
 
     assert_eq!(
         data.vendor_name,
@@ -34,7 +34,7 @@ fn parse_polaris(db: Database) {
 #[test]
 fn parse_vega() {
     let db = Database::read().unwrap();
-    let data = db.get_device_info("1002", "687F", "1043", "0555");
+    let data = db.get_device_info(0x1002, 0x687F, 0x1043, 0x0555);
 
     assert_eq!(
         data.vendor_name,
@@ -52,8 +52,7 @@ fn parse_vega() {
 fn class_not_in_vendors() {
     let db = Database::read().unwrap();
 
-    assert_eq!(db.vendors.get("c"), None);
-    assert_eq!(db.vendors.get("c 09"), None);
+    assert_eq!(db.vendors.get(&0xc), None);
 }
 
 #[test]

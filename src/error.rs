@@ -62,4 +62,8 @@ impl Error {
     pub(crate) fn no_current_subclass() -> Error {
         Error::Parse("trying to add a programming interface without a subclass".to_owned())
     }
+
+    pub(crate) fn invalid_int(value: &str) -> Error {
+        Error::Parse(format!("Could not parse {value} as integer"))
+    }
 }

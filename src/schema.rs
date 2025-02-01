@@ -15,7 +15,7 @@ pub struct DeviceInfo<'a> {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Vendor {
     pub name: String,
-    pub devices: HashMap<String, Device>,
+    pub devices: HashMap<u16, Device>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,20 +28,20 @@ pub struct Device {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SubDeviceId {
-    pub subvendor: String,
-    pub subdevice: String,
+    pub subvendor: u16,
+    pub subdevice: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Class {
     pub name: String,
-    pub subclasses: HashMap<String, SubClass>,
+    pub subclasses: HashMap<u8, SubClass>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SubClass {
     pub name: String,
-    pub prog_ifs: HashMap<String, String>,
+    pub prog_ifs: HashMap<u8, String>,
 }

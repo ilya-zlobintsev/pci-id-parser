@@ -33,8 +33,8 @@ pub enum VendorDataError {
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Database {
-    pub vendors: HashMap<String, Vendor>,
-    pub classes: HashMap<String, Class>,
+    pub vendors: HashMap<u16, Vendor>,
+    pub classes: HashMap<u8, Class>,
 }
 
 impl Database {
@@ -64,7 +64,7 @@ impl Database {
     pub fn get_online() -> Result<Self, Error> {
         let response = ureq::get(URL).call()?;
 
-        Self::parse_db(response.into_reader())
+        Self::parse_db(response.into_body().into_reader())
     }
 
     /// Parse a database from the given reader
@@ -76,14 +76,14 @@ impl Database {
         let reader = BufReader::new(reader);
         let mut parser = Parser::new(reader);
 
-        let mut current_vendor: Option<(String, Vendor)> = None;
-        let mut current_device: Option<(String, Device)> = None;
+        let mut current_vendor: Option<(u16, Vendor)> = None;
+        let mut current_device: Option<(u16, Device)> = None;
 
-        let mut current_class: Option<(String, Class)> = None;
-        let mut current_subclass: Option<(String, SubClass)> = None;
+        let mut current_class: Option<(u8, Class)> = None;
+        let mut current_subclass: Option<(u8, SubClass)> = None;
 
-        let mut vendors: HashMap<String, Vendor> = HashMap::with_capacity(2500);
-        let mut classes: HashMap<String, Class> = HashMap::with_capacity(200);
+        let mut vendors: HashMap<u16, Vendor> = HashMap::with_capacity(2500);
+        let mut classes: HashMap<u8, Class> = HashMap::with_capacity(200);
 
         while let Some(event) = parser.next_event()? {
             match event {
@@ -103,7 +103,10 @@ impl Database {
                         name: name.to_owned(),
                         devices: HashMap::new(),
                     };
-                    current_vendor = Some((id.to_owned(), vendor));
+                    current_vendor = Some((
+                        u16::from_str_radix(id, 16).map_err(|_| Error::invalid_int(id))?,
+                        vendor,
+                    ));
                 }
                 Event::Device { id, name } => {
                     // Device section is over, write to vendor
@@ -119,7 +122,11 @@ impl Database {
                         name: name.to_owned(),
                         subdevices: HashMap::new(),
                     };
-                    current_device = Some((id.to_owned(), device));
+
+                    current_device = Some((
+                        u16::from_str_radix(id, 16).map_err(|_| Error::invalid_int(id))?,
+                        device,
+                    ));
                 }
                 Event::Subdevice {
                     subvendor,
@@ -131,8 +138,10 @@ impl Database {
                         .ok_or_else(Error::no_current_device)?;
 
                     let subdevice_id = SubDeviceId {
-                        subvendor: subvendor.to_owned(),
-                        subdevice: subdevice.to_owned(),
+                        subvendor: u16::from_str_radix(subvendor, 16)
+                            .map_err(|_| Error::invalid_int(subvendor))?,
+                        subdevice: u16::from_str_radix(subdevice, 16)
+                            .map_err(|_| Error::invalid_int(subdevice))?,
                     };
                     current_device
                         .subdevices
@@ -153,7 +162,10 @@ impl Database {
                         name: name.to_owned(),
                         subclasses: HashMap::new(),
                     };
-                    current_class = Some((id.to_owned(), class));
+                    current_class = Some((
+                        u8::from_str_radix(id, 16).map_err(|_| Error::invalid_int(id))?,
+                        class,
+                    ));
                 }
                 Event::SubClass { id, name } => {
                     if let Some((subclass_id, subclass)) = current_subclass {
@@ -167,14 +179,20 @@ impl Database {
                         name: name.to_owned(),
                         prog_ifs: HashMap::new(),
                     };
-                    current_subclass = Some((id.to_owned(), subclass));
+                    current_subclass = Some((
+                        u8::from_str_radix(id, 16).map_err(|_| Error::invalid_int(id))?,
+                        subclass,
+                    ));
                 }
                 Event::ProgIf { id, name } => {
                     let (_, subclass) = current_subclass
                         .as_mut()
                         .ok_or_else(Error::no_current_subclass)?;
 
-                    subclass.prog_ifs.insert(id.to_owned(), name.to_owned());
+                    subclass.prog_ifs.insert(
+                        u8::from_str_radix(id, 16).map_err(|_| Error::invalid_int(id))?,
+                        name.to_owned(),
+                    );
                 }
             }
         }
@@ -216,18 +234,13 @@ impl Database {
     }
 
     #[must_use]
-    pub fn get_device_info<'a>(
-        &'a self,
-        vendor_id: &str,
-        model_id: &str,
-        subsys_vendor_id: &str,
-        subsys_model_id: &str,
-    ) -> DeviceInfo<'a> {
-        let vendor_id = vendor_id.to_lowercase();
-        let model_id = model_id.to_lowercase();
-        let subsys_vendor_id = subsys_vendor_id.to_lowercase();
-        let subsys_model_id = subsys_model_id.to_lowercase();
-
+    pub fn get_device_info(
+        &self,
+        vendor_id: u16,
+        model_id: u16,
+        subsys_vendor_id: u16,
+        subsys_model_id: u16,
+    ) -> DeviceInfo<'_> {
         let mut vendor_name = None;
         let mut device_name = None;
         let mut subvendor_name = None;
@@ -244,7 +257,7 @@ impl Database {
                 }
 
                 let subdevice_id = SubDeviceId {
-                    subvendor: subsys_vendor_id.clone(),
+                    subvendor: subsys_vendor_id,
                     subdevice: subsys_model_id,
                 };
 
