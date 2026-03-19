@@ -20,6 +20,7 @@ use std::{
 const DB_PATHS: &[&str] = &[
     "/usr/share/hwdata/pci.ids",
     "/usr/share/misc/pci.ids",
+    "/run/current-system/sw/share/pci.ids", // NixOS
     "@hwdata@/share/hwdata/pci.ids",
 ];
 #[cfg(feature = "online")]
